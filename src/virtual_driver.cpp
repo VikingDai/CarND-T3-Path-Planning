@@ -240,25 +240,13 @@ void VirtualDriver::path_history_update(const Path &prev)
 }
 
 /******************************************************************************
-* Behavior Planning                                                           *
+* Trajectory Pool Generation                                                  *
 ******************************************************************************/
 
 // Given were we are and whats around us (AND where we think those things will
 // go), we can choose what we think we should do. This is effectively our
 // driving brain thats telling the system what manuevers to make and how to go
-// through traffic. This portion IS NOT responsible for actually generating a
-// route or planing HOW to enact that route safely. Thats the trajectory
-// planner's job.
-
-// This implemenation is highway driving specific and uses a finite state
-// machine (FSM) to determine what we can do based on our current state. It
-// evaluates all the things we could do based on a series of cost functions
-// and hands over the chosen behavior to the trajectory planner to enact in a
-// safe way
-
-/******************************************************************************
-* Trajectory Pool Generation                                                  *
-******************************************************************************/
+// through traffic.
 
 // The Behavior Planner is tightly coupled with the Trajectory planner. Here,
 // the trajectory planner does a lot of heavy lifting to generate a bunch of
@@ -267,7 +255,7 @@ void VirtualDriver::path_history_update(const Path &prev)
 // the lines are super blurred here because of how closely these layers work
 // together
 
-// Calculate a trajectory for an action, given where we are now and whats
+// Calculate trajectories for an action, given where we are now and whats
 // around us
 TrajectorySet VirtualDriver::generate_trajectories()
 {
@@ -362,17 +350,16 @@ TrajectorySet VirtualDriver::generate_trajectories()
 }
 
 /******************************************************************************
-* Prediction Planning                                                         *
+* Prediction Planning and Behavior Selection                                  *
 ******************************************************************************/
 
 // The object tracker will maintain the status of the surrounding vehicles and
 // lanes. Given our sorted list of possible trajectories, we can probe the
-// tracker to tell us the first one that _doesnt_ collide with an obstacle
+// tracker to tell us the first one that _doesnt_ collide with an obstacle.
+// Since behaviors are sorted by lowest cost, we'll take the first one that
+// comes back as safe!
 
-/******************************************************************************
-* Behavior Planning                                                           *
-******************************************************************************/
-
+// Attempt to hard limit the speeds of the path we choose
 bool VirtualDriver::comfortable(Trajectory &traj)
 {
   Path p = generate_path(traj);
@@ -387,6 +374,8 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   return true;
 }
 
+// Given a list of sorted (by cost) trajectories, pick the optimal one for us
+// to follow
 Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectories)
 {
   #ifdef DEBUG
@@ -447,7 +436,7 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
   // Generate the path
   for (int i = 0; i < n; ++i)
   {
-    if(start_ind < m_planning_horizon - 1 && i < 3)
+    if(start_ind < m_planning_horizon - 1 && i < 5)
     {
       // s = m_cur_s_coeffs.at(start_time + ((double) i) * td);
       // d = m_cur_d_coeffs.at(start_time + ((double) i) * td);
@@ -478,7 +467,7 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
   return Path(xpts, ypts);
 }
 
-// Convert a Trajectory into an actual followable path for the simulator
+// Convert a Trajectory into a smoothed, actual followable path for the simulator
 Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 {
   // Extract JMTs
@@ -504,7 +493,7 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     double s = jmt_s.at(((double) i) * td);
     double d = jmt_d.at(((double) i) * td);
 
-    if(start_ind < m_planning_horizon - 1 && i < 3)
+    if(start_ind < m_planning_horizon - 1 && i < 5)
     {
       xpts.push_back(prev_path.x[i]);
       ypts.push_back(prev_path.y[i]);
@@ -526,7 +515,7 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
   }
 
   // Double check the path for smoothness now that we're in the xy space
-  int smooth_size = 5;
+  int smooth_size = 15;
   int first = 0;
   int nth = smooth_size;
 
@@ -601,7 +590,7 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 }
 
 /******************************************************************************
-* Path Planner                                                                *
+* Path Planner Pipeline                                                       *
 ******************************************************************************/
 
 // Path planning is the name used to describe to interaction of the above steps
