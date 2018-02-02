@@ -1,0 +1,240 @@
+/******************************************************************************
+* Trajectory Pool Generation                                                  *
+******************************************************************************/
+
+// The Behavior Planner is tightly coupled with the Trajectory planner. Here,
+// the trajectory planner does a lot of heavy lifting to generate a bunch of
+// candidate trajectories that can be evaluated for optimality later by the
+// behavior planner. Its a bit backwards compared to some of the lessons, but
+// the lines are super blurred here because of how closely these layers work
+// together
+
+// When I'm keeping lane and following, OR changing lanes and wanted to follow
+// after, this is how close to keep. In real life, this is probably determined
+// by the current speed and how long it would take to come to a complete stop
+// Roughly v / A_MAX --> t to stop?
+static const double FOLLOWING_DISTANCE = 5.0; // meters
+
+// time between steps
+static const double TIME_DELTA = 0.02;
+
+// Calculate a trajectory for an action, given where we are now and whats
+// around us
+TrajectorySet VirtualDriver::generate_trajectories()
+{
+  // Trajectory set to return
+  TrajectorySet possible_trajectories;
+
+  // Path State Parameters for JMT generation
+  double si, si_dot, si_dot_dot;
+  double di, di_dot, di_dot_dot;
+  double sf, sf_dot, sf_dot_dot;
+  double df, df_dot, df_dot_dot;
+
+  // How much time will it take to get to the state?
+  double action_time = 3.0;
+
+  // Useful Vehicle State vars cached
+  int current_lane = mRoad.get_vehicle_lane(mVeh);
+
+  // To help go back to default behavior
+  bool lane_change_failed = false;
+
+  // Calculate an index based on how many dots have been eaten
+  // and how many we planned
+  int start_ind = horizon - prev_traj_size - 1;
+  double start_time = start_ind * TIME_DELTA;
+
+  // Initial take off state based on current trajectory
+  // NOTE: These will be overwritten if there's no existing path
+  si = cur_s_coeffs.get_position_at(start_time);
+  si_dot = cur_s_coeffs.get_velocity_at(start_time);
+  si_dot_dot = cur_s_coeffs.get_acceleration_at(start_time);
+  di = cur_d_coeffs.get_position_at(start_time);
+  di_dot = cur_d_coeffs.get_velocity_at(start_time);
+  di_dot_dot = cur_d_coeffs.get_acceleration_at(start_time);
+
+  // if(next_action == LANE_CHANGE_LEFT)
+  // {
+  //   // Define our final D state parameters - Lane change to left
+  //   df = this->mRoad.get_lane_mid_frenet(current_lane - 1);
+  //   df_dot = 0;
+  //   df_dot_dot = 0;
+
+  //   // Since we're changing lanes, our final speed should be the
+  //   // speed of the lane we go to.
+  //   sf_dot = lane_speed(current_lane - 1);
+
+  //   // We should aim to be AT the speed without any more
+  //   // acceleration needed
+  //   sf_dot_dot = 0;
+
+  //   // The final position is determined by the time it takes
+  //   // to safely carry out the action
+  //   //action_time = std::ceil(std::abs((sf_dot - si_dot) / A_MAX) / TIME_DELTA) * TIME_DELTA;
+  //   sf = si + ((sf_dot + si_dot) / 2.0) * action_time;
+
+  // }
+  // else if(next_action == LANE_CHANGE_RIGHT)
+  // {
+  //   // Define our final D state parameters - Lane change to right
+  //   df = this->mRoad.get_lane_mid_frenet(current_lane + 1);
+  //   df_dot = 0;
+  //   df_dot_dot = 0;
+
+  //   // Since we're changing lanes, our final speed should be the
+  //   // speed of the lane we go to.
+  //   sf_dot = lane_speed(current_lane + 1);
+
+  //   // We should aim to be AT the speed without any more
+  //   // acceleration needed
+  //   sf_dot_dot = 0;
+
+  //   // The final position is determined by the time it takes
+  //   // to safely carry out the action
+  //   //action_time = std::ceil(std::abs((sf_dot - si_dot) / A_MAX) / TIME_DELTA) * TIME_DELTA;
+  //   sf = si + ((sf_dot + si_dot) / 2.0) * action_time;
+  // }
+
+  // If we don't have a previous state, we're probably just taking off
+  // from a start. Lets just plan to get up to speed first
+  if(prev_traj_size == 0)
+  {
+    // Special initial take off state
+    si = mVeh.s;
+    si_dot = 0;
+    si_dot_dot = 0;
+    di = mVeh.d;
+    di_dot = 0;
+    di_dot_dot = 0;
+
+    // Desired final state for D is pretty easy...
+    df = mRoad.get_lane_mid_frenet(current_lane);
+    df_dot = 0;
+    df_dot_dot = 0;
+
+    // The final state for S is a bit harder. Given a speed we would
+    // ideally like to hit, we need to figure out how to get there
+    // comfortably and safely --> determines time and distance
+    sf_dot = MPH_TO_MPS(mRoad.speed_limit);
+    sf_dot_dot = 0;
+    sf = 0;
+
+    // Set the action time
+    //action_time = std::ceil(std::abs((sf_dot - si_dot) / A_MAX) / TIME_DELTA) * TIME_DELTA;
+
+    // Set sf based on action time
+    sf = si + ((sf_dot + si_dot) / 2.0) * action_time;
+  }
+
+  else // if(lane_change_failed || next_action == KEEP_LANE)
+  {
+    // Define our final D state parameters - the lane isnt changing
+    // and we really should accelerate or move around the D value
+    df = this->mRoad.get_lane_mid_frenet(current_lane);
+    df_dot = 0;
+    df_dot_dot = 0;
+
+    // if we're following, the speed should match the lane speed.
+    // Lane speed depends on if theres a car in front or not. If
+    // there is, its that car's speed. It there isn't, its the
+    // speed limit.
+    // NOTE: The time it takes to change speeds depends on the max
+    // allowed acceleration value.
+    sf_dot = lane_speed(current_lane);
+
+    // For helping determine the time to complete the entine action
+    // Without anyone in our way, it'll take time based on our
+    // acceleration value and how much we want to change speeds
+    // action_time = std::abs((sf_dot - si_dot) / A_MAX);
+    // if(action_time < TIME_DELTA) action_time = TIME_DELTA;
+    // = std::ceil(std::abs((sf_dot - si_dot) / A_MAX) / TIME_DELTA) * TIME_DELTA;
+
+    // The final position we would desire depends on if theres
+    // a car in front. If there isn't...
+    if(this->first_in_front_for_lane[current_lane] == -1)
+    {
+      // We just figure out how far we would have traveled while
+      // changing our velocity in the given time
+      sf = si + ((sf_dot + si_dot) / 2.0) * action_time;
+    }
+    else
+    {
+      // If there is, we need to determine how long it would take
+      // to comfortably slow down, then predict how far the car we're
+      // following would have gone, AND THEN aim to be behind that car
+      // a given "following distance"
+      // NOTE: AHHHHHHHHH
+      //sf = - FOLLOWING_DISTANCE;
+      sf = si + ((sf_dot + si_dot) / 2.0) * action_time - FOLLOWING_DISTANCE;
+    }
+
+    // Our final acceleration should be zero because we're hit the
+    // speed we want to be at at the end of our trajectory
+    sf_dot_dot = 0;
+  }
+
+  // if(lane_change_failed || next_action == KEEP_LANE)
+  // {
+  //   // Desired final state for D is pretty easy...
+  //   df = mRoad.get_lane_mid_frenet(current_lane);
+  //   df_dot = 0;
+  //   df_dot_dot = 0;
+
+  //   // The final state for S is a bit harder. Given a speed we would
+  //   // ideally like to hit, we need to figure out how to get there
+  //   // comfortably and safely --> determines time and distance
+  //   sf_dot = MPH_TO_MPS(mRoad.speed_limit);
+  //   sf_dot_dot = 0;
+  //   sf = 0;
+
+  //   // Set the action time
+  //   //action_time = std::ceil(std::abs((sf_dot - si_dot) / A_MAX) / TIME_DELTA) * TIME_DELTA;
+
+  //   // Set sf based on action time
+  //   sf = si + ((sf_dot + si_dot) / 2.0) * action_time;
+  // }
+
+  // Use a JMT to generate a path for s and d, where action_time is how long
+  // it will take to transistion between the initial and final states. I
+  // predict this time based on a max acceleration value and the differences
+  // in speed
+  JMT s_path = JMT({si, si_dot, si_dot_dot}, {sf, sf_dot, sf_dot_dot}, action_time);
+  JMT d_path = JMT({di, di_dot, di_dot_dot}, {df, df_dot, df_dot_dot}, action_time);
+
+  // Turn our JMTs into a full blown trajectory
+  Trajectory traj = Trajectory(s_path, d_path, action_time);
+
+  // Add traj to our set of possible trajectories
+  possible_trajectories.push_back(traj);
+
+  // Debug
+  #ifdef DEBUG
+  std::cout << "[+] Previous Path Size: " << prev_traj_size << std::endl;
+  std::cout << "[+] Previous Path Consumed: " << (horizon - prev_traj_size < 0 ? 0 : horizon - prev_traj_size) << std::endl;
+  std::cout << "[+] Evaluate Start at Ind: " << (horizon - prev_traj_size < 0 ? 0 : horizon - prev_traj_size - 1) << std::endl;
+  std::cout << "[+] Evaluate Start at t: " << (horizon - prev_traj_size < 0 ? 0 : (horizon - prev_traj_size - 1) * TIME_DELTA) << std::endl;
+  std::cout << "[+] Starting State:\n-    si: " << si << ", si_d: " << si_dot << ", si_d_d: " << si_dot_dot << std::endl
+            << "-    di: " << di << ", di_d: " << di_dot << ", di_d_d: " << di_dot_dot << std::endl;
+  std::cout << "[+] Final State:\n-    sf: " << sf << ", sf_d: " << sf_dot << ", sf_d_d: " << sf_dot_dot << std::endl
+            << "-    df: " << df << ", df_d: " << df_dot << ", df_d_d: " << df_dot_dot << std::endl;
+  std::cout << "[+] Time Horizon: " << action_time << " seconds (" << action_time / TIME_DELTA << " steps)" << std::endl;
+  std::cout << "[+] JMTs:" << std::endl << "-    S: " << s_path << std::endl << "-    D: " << d_path << std::endl;
+  std::cout << "[+] Path Horizon: " << traj.size() << std::endl;
+
+  // std::cout << "Trajectory:\n";
+  // double last_x = this->mVeh.x, last_y = this->mVeh.y, last_v = this->mVeh.speed, last_a = 0;
+  // for(int i = 0; i < traj.size(); ++i){
+  //   double v = distance(last_x, last_y, traj.x[i], traj.y[i]) / TIME_DELTA;
+  //   double a = (v - last_v) / TIME_DELTA;
+  //   double j = (a - last_a) / TIME_DELTA;
+  //   last_x = traj.x[i]; last_y = traj.y[i]; last_v = v; last_a = a;
+  //   std::cout << "t = " << i * TIME_DELTA << "|\t(" << traj.x[i] << ", " << traj.y[i]
+  //             << ") -- v = " << v << ", a = " << a << ", j = " << j
+  //             << std::endl;
+  // }
+  // std::cout << std::endl;
+  #endif
+
+  return possible_trajectories;
+}
