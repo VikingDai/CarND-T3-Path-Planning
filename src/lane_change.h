@@ -8,6 +8,7 @@
 
 #include "behavior.h"
 #include "trajectory.h"
+#include <cmath>
 
 class LaneChange: public Behavior {
   public:

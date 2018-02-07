@@ -7,18 +7,19 @@
 
 #include <iostream>
 #define DEBUG
+#define DEBUG_COST
 
 using namespace std;
 
 LaneFollow::LaneFollow(){
 
-  distance_buffer = 10.0; // meters, fixed distance of safety past a time gap
-  time_gap = 0.0;        // seconds,
+  distance_buffer = 0.0; // meters, fixed distance of safety past a time gap
+  time_gap = 1.0;        // seconds,
 
   dt = 0.05;  // time delta for summing integral costs
 
   k_j = 25.0; // Coeff for jerk cost
-  k_t = 2.0; // Coeff for time cost
+  k_t = 10.0; // Coeff for time cost
   k_s = 50.0; // Coeff for lat movement cost
   k_d = 5.0; // Coeff for lon movement cost
 
@@ -54,19 +55,24 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   double follow_s_dot = (following.s_dot == 0 ? following.speed : following.s_dot);
   double follow_a = following.s_dot_dot;
 
-  // Keep lane if we're not thaaat close
-  if((follow_s - si) < 20) return;
+  #ifdef DEBUG
+  cout << " [-] Should be following 'Obstacle ID " << follow_id << "' at s = "
+       << follow_s << " (Ego S = " << si << ")"
+       << endl;
+  #endif
 
   // Our target values
   double speed_limit = r.speed_limit;
   double target_d = r.get_lane_mid_frenet(current_lane);
 
   // Iterate on possible T values for this behavior
-  double min_T = 0.5;
-  double max_T = 3.0;
+  double target_T = 1.5; // seconds
   double dT = 0.5;
+  double min_T = target_T - 1.0 * dT;
+  double max_T = target_T + 2.5 * dT;
 
   #ifdef DEBUG
+  cout << " [*] Trying " << ((max_T - min_T) / dT) << " combinations" << endl;
   cout << " [-] Varying given:" << endl
        << "   - T = " << min_T << " and T = " << max_T << endl
        << "   - Current Lane: " << current_lane << endl
@@ -76,6 +82,13 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
        << "   - Follow s_dot_dot: " << follow_a << endl
        << "   - max_speed: " << speed_limit << endl
        << "   - target_d: " << target_d << endl;
+  #endif
+
+  #ifdef DEBUG_COST
+  static double max_c = 0.0;
+  static double min_c = 100000000.0;
+  static double avg_c = 0.0;
+  static int N = 0;
   #endif
 
   // generate our trajectories
@@ -123,7 +136,21 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
 
     // Add traj to our set of possible trajectories
     insert_traj_sorted(t_set, traj);
+
+    #ifdef DEBUG_COST
+    if(c < min_c) min_c = c;
+    if(c > max_c) max_c = c;
+    N++;
+    avg_c = ((avg_c * (N - 1)) + c) / N;
+    #endif
   }
+
+  #ifdef DEBUG_COST
+  cout << " [*] Behavior '" << name() << "' cost stats:" << endl
+       << "   - Average: " << avg_c << endl
+       << "   - max: " << max_c << endl
+       << "   - min: " << min_c << endl;
+  #endif
 }
 
 // Calculate a cost for this behavior
@@ -146,8 +173,8 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s, const do
   double J_t_lon = 0.0;
   for(double t = 0.0; t <= traj.T; t += dt)
   {
-    V_t_lat += traj.s.get_velocity_at(t) * traj.s.get_velocity_at(t);
-    V_t_lon += traj.d.get_velocity_at(t) * traj.d.get_velocity_at(t);
+    // V_t_lat += traj.s.get_velocity_at(t) * traj.s.get_velocity_at(t);
+    // V_t_lon += traj.d.get_velocity_at(t) * traj.d.get_velocity_at(t);
 
     A_t_lat += traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
     A_t_lon += traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
@@ -156,13 +183,17 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s, const do
     J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
 
-  // Penalty for being far from the target speed
-  double s_dot_f = traj.s.get_velocity_at(traj.T);
-  double speed_pen = (s_dot_f - target_s_dot) * (s_dot_f - target_s_dot);
+  // Penalty for being far away from the target car to encourage the ego
+  // to keep lane and catch up
+  double C_follow_dist = (sf - target_s) * (sf - target_s);
+
+  // Penalty for being far from the target following speed
+  double sf_dot = traj.s.get_velocity_at(traj.T);
+  double C_speed_pen = (sf_dot - target_s_dot) * (sf_dot - target_s_dot);
 
   // Penalize driving slower than the speed limit to try to encourage
-  // our ego to change lanes
-  double speed_slow = (s_dot_f - speed_limit) * (s_dot_f - speed_limit);
+  // our ego to keep or change lanes
+  double C_speed_slow = (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed
@@ -179,7 +210,7 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s, const do
   double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2) + V_t_lon + A_t_lon;
 
   // Extra costs outside of the algorithm
-  double C_extra = V_t_lat + V_t_lon + A_t_lat + A_t_lon + 2.5*speed_slow + speed_pen;
+  double C_extra = V_t_lat + V_t_lon + 25.0 * (A_t_lat + A_t_lon) + 5.0 * C_speed_slow + C_speed_pen + 100.0 * C_follow_dist;
 
   // Return the combined trajectory cost
   return k_lat * C_lat + k_lon * C_lon + C_extra;

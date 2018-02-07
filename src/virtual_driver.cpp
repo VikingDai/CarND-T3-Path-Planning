@@ -5,8 +5,9 @@
 using namespace std;
 
 // TO-DO: Define some debug header maybe so it can be cross file?
-#define DEBUG
-#define DEBUG2
+// #define DEBUG
+// #define DEBUG2
+#define DEBUG_LITE
 
 /******************************************************************************
 * Utility Functions and Helpers                                               *
@@ -139,6 +140,62 @@ static std::vector<double> getXY(double s, double d, const std::vector<double> &
   double y = seg_y + d * sin(perp_heading);
 
   return {x,y};
+}
+
+// Credit to Effendi for suggesting this method and providing a snippet of
+// code to make it work. See his full source at:
+// https://github.com/edufford/CarND-Path-Planning-Project-P11
+std::vector<double> GetHiResXY(double s, double d,
+                               const std::vector<double> &map_s,
+                               const std::vector<double> &map_x,
+                               const std::vector<double> &map_y) {
+
+  // Wrap around s
+  s = std::fmod(s, 6945.554);
+
+  // Find 2 waypoints before s and 2 waypoints after s for angular interpolation
+  auto it_wp1_search = std::lower_bound(map_s.begin(), map_s.end(), s);
+  int wp1 = (it_wp1_search - map_s.begin() - 1); // wp before s
+  int wp2 = (wp1 + 1) % map_s.size(); // wp after s
+  int wp3 = (wp2 + 1) % map_s.size(); // wp 2nd after s
+  int wp0 = wp1 - 1; // wp 2nd before s
+  if (wp0 < 0) { wp0 = map_s.size() - 1; } // wrap around backwards
+
+  // Use angle between wp1-wp2 to derive segment vector at distance s from wp1
+  double theta_wp = atan2((map_y[wp2] - map_y[wp1]),
+                          (map_x[wp2] - map_x[wp1]));
+
+  // The (x,y,s) along the segment vector between wp1 and wp2
+  double seg_s = s - map_s[wp1];
+  double seg_x = map_x[wp1] + seg_s * cos(theta_wp);
+  double seg_y = map_y[wp1] + seg_s * sin(theta_wp);
+
+  // Interpolate theta at s based on the distance between wp1 (with ave angle
+  // from wp0 before and wp2 after) and wp2 (with ave angle from wp1 before
+  // and wp3 after)
+  double theta_wp1ave = atan2((map_y[wp2] - map_y[wp0]),
+                              (map_x[wp2] - map_x[wp0]));
+
+  double theta_wp2ave = atan2((map_y[wp3] - map_y[wp1]),
+                              (map_x[wp3] - map_x[wp1]));
+
+  double s_interp = (s - map_s[wp1]) / (map_s[wp2] - map_s[wp1]);
+
+  double cos_interp = ((1-s_interp) * cos(theta_wp1ave)
+                         + s_interp * cos(theta_wp2ave));
+
+  double sin_interp = ((1-s_interp) * sin(theta_wp1ave)
+                         + s_interp * sin(theta_wp2ave));
+
+  double theta_interp = atan2(sin_interp, cos_interp);
+
+  // Use interpolated theta to calculate final (x,y) at d offset from the
+  // segment vector
+  double theta_perp = theta_interp - pi()/2;
+  double x = seg_x + d * cos(theta_perp);
+  double y = seg_y + d * sin(theta_perp);
+
+  return {x, y};
 }
 
 /******************************************************************************
@@ -307,8 +364,8 @@ TrajectorySet VirtualDriver::generate_trajectories()
     di_dot_dot = 0;
   }
 
-  #ifdef DEBUG
-  std::cout << " [*] Starting Parameters: " << std::endl
+  #ifdef DEBUG_LITE
+  std::cout << " [*] Starting Parameters:" << std::endl
               << "  - si:    " << si << std::endl
               << "  - si_d:  " << si_dot << std::endl
               << "  - si_dd: " << si_dot_dot << std::endl
@@ -317,7 +374,6 @@ TrajectorySet VirtualDriver::generate_trajectories()
               << "  - di_dd: " << di_dot_dot << std::endl
               << "  - current_lane: " << current_lane << std::endl
               << "  - speed_limit: " << mRoad.speed_limit << " m/s" << std::endl;
-  std::cout << " [*] Determing Possible Trajectories (" << m_vehicle_behaviors.size() << "): " << std::endl;
   #endif
 
   // With our current set of starting conditions and some final conditions set
@@ -325,8 +381,12 @@ TrajectorySet VirtualDriver::generate_trajectories()
   // can follow.
   for(int i = 0; i < m_vehicle_behaviors.size(); ++i)
   {
+    #ifdef DEBUG_LITE
+
     #ifdef DEBUG
     std::cout << " [*] Behavior " << i + 1 << ": " << m_vehicle_behaviors[i]->name() << std::endl;
+    #endif
+
     int t_count = n_possible_trajectories.size();
     #endif
 
@@ -336,7 +396,7 @@ TrajectorySet VirtualDriver::generate_trajectories()
                                              current_lane, mRoad,
                                              m_tracker);
 
-    #ifdef DEBUG
+    #ifdef DEBUG_LITE
     std::cout << " [+] Added " << n_possible_trajectories.size() - t_count
               << " for '" << m_vehicle_behaviors[i]->name() << "'" << std::endl;
     #endif
@@ -362,13 +422,82 @@ TrajectorySet VirtualDriver::generate_trajectories()
 // Attempt to hard limit the speeds of the path we choose
 bool VirtualDriver::comfortable(Trajectory &traj)
 {
-  Path p = generate_path(traj);
+  Path p = generate_smoothed_path(traj);
   double last_x = mVeh.x, last_y = mVeh.y, last_v = mVeh.speed;
 
-  for(int i = 0; i < p.size(); ++i)
+  // For averaging/gating the acceleration
+  double MAX_ACC_MAG = 5.0;
+  int window_size = 10;
+  int acc_ins = 0;
+  double dt = window_size * TIME_DELTA;
+  vector<double> accels = vector<double>(window_size, 0.0);
+  double avg_a = 0.0;
+
+  // Start at the second point because in theory the 0th is the start state
+  // that we already know from the last trajectory we follows
+  for(int i = 1; i < p.size(); ++i)
   {
-    double v = distance(p.x[i], p.y[i], last_x, last_y) / TIME_DELTA;
-    if(v >= MPH_TO_MPS(50)) return false;
+    double dist = distance(p.x[i], p.y[i], last_x, last_y);
+    double v =  dist / TIME_DELTA;
+    double a = (v - last_v) / TIME_DELTA;
+
+    // Always check speed
+    if(v >= mRoad.speed_limit)
+    {
+      #ifdef DEBUG
+      std::cout << " [*] Rejected for speed:" << std::endl
+                << "   - i = " << i << std::endl
+                << "   - last_x = " << last_x << std::endl
+                << "   - last_y = " << last_y << std::endl
+                << "   - x = " << p.x[i] << std::endl
+                << "   - y = " << p.y[i] << std::endl
+                << "   - dist = " << dist << std::endl
+                << "   - last_v = " << last_v << std::endl
+                << "   - v = " << v << std::endl
+                << "   - a = " << a << std::endl
+                << "   - type: " << traj.behavior << std::endl
+                << "   - s: " << traj.s << std::endl
+                << "   - d: " << traj.d << std::endl
+                << "   - cost: " << traj.cost << std::endl
+                << "   - T: " << traj.T << std::endl;
+      #endif
+      return false;
+    }
+
+    // Check the averaged acceleration over the last N frames
+    // First, add the acceleration value to our set of values
+    accels[acc_ins % window_size] = a;
+    acc_ins++;
+
+    // If it hasn't been N frames, just keep going, not enough
+    // data points yet, otherwise, get that average and compare
+    if(i >= window_size)
+    {
+      avg_a = 0;
+      for(int j = 0; i < window_size; ++j) avg_a += accels[j];
+      avg_a = avg_a / dt;
+      if(abs(avg_a) >= MAX_ACC_MAG)
+      {
+        #ifdef DEBUG
+        std::cout << " [*] Rejected for acceleration:" << std::endl
+                  << "   - i = " << i << std::endl
+                  << "   - last_x = " << last_x << std::endl
+                  << "   - last_y = " << last_y << std::endl
+                  << "   - x = " << p.x[i] << std::endl
+                  << "   - y = " << p.y[i] << std::endl
+                  << "   - dist = " << dist << std::endl
+                  << "   - last_v = " << last_v << std::endl
+                  << "   - v = " << v << std::endl
+                  << "   - a = " << a << std::endl
+                  << "   - type: " << traj.behavior << std::endl
+                  << "   - s: " << traj.s << std::endl
+                  << "   - d: " << traj.d << std::endl
+                  << "   - cost: " << traj.cost << std::endl
+                  << "   - T: " << traj.T << std::endl;
+        #endif
+        return false;
+      }
+    }
     last_x = p.x[i]; last_y = p.y[i]; last_v = v;
   }
   return true;
@@ -390,8 +519,10 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
     std::cout << " [+] Checking a '" << (*it).behavior << "' of cost " << (*it).cost << std::endl;
     #endif
 
-    // && comfortable(*it)
-    if(m_tracker.trajectory_is_safe(*it)) return *it;
+    // Make sure the trajectory is safe (no collisions) and
+    // comfy (speed, accel and jerk are under requirements)
+    if(m_tracker.trajectory_is_safe(*it) && comfortable(*it)) return *it;
+
     #ifdef DEBUG
     std::cout << " [*] Removed Trajectory:" << std::endl
               << "   - type: " << (*it).behavior << std::endl
@@ -402,8 +533,24 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
     #endif
   }
 
-  // Default to the last path we had I guess
-  return Trajectory(m_cur_s_coeffs, m_cur_d_coeffs, 0);
+  // Default to the last path we had I guess?
+  // TO-DO: What the heck do people do in real life here? Emergency stop?
+  Trajectory def = Trajectory(m_cur_s_coeffs, m_cur_d_coeffs, 0);
+
+  #ifdef DEBUG_LITE
+  std::cout << " [*] oh noooooooo we aint got nothing that works" << std::endl;
+  #endif
+
+  #ifdef DEBUG
+  std::cout << " [*] Old Trajectory:" << std::endl
+            << "   - type: " << (def).behavior << std::endl
+            << "   - s: " << (def).s << std::endl
+            << "   - d: " << (def).d << std::endl
+            << "   - cost: " << (def).cost << std::endl
+            << "   - T: " << (def).T << std::endl;
+  #endif
+
+  return def;
 }
 
 /******************************************************************************
@@ -436,7 +583,7 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
   // Generate the path
   for (int i = 0; i < n; ++i)
   {
-    if(start_ind < m_planning_horizon - 1 && i < 5)
+    if(start_ind < m_planning_horizon - 1 && i < -100000)
     {
       // s = m_cur_s_coeffs.at(start_time + ((double) i) * td);
       // d = m_cur_d_coeffs.at(start_time + ((double) i) * td);
@@ -455,7 +602,7 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
     if(s > mMap.max_s) s -= mMap.max_s;
     else if(s < 0) s += mMap.max_s;
 
-    std::vector<double> xy = getXY(s, d, mMap.waypoints_s, mMap.waypoints_x, mMap.waypoints_y);
+    std::vector<double> xy = GetHiResXY(s, d, mMap.waypoints_s, mMap.waypoints_x, mMap.waypoints_y);
     xpts.push_back(xy[0]);
     ypts.push_back(xy[1]);
 
@@ -493,7 +640,7 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     double s = jmt_s.at(((double) i) * td);
     double d = jmt_d.at(((double) i) * td);
 
-    if(start_ind < m_planning_horizon - 1 && i < 5)
+    if(start_ind < m_planning_horizon - 1 && i < 0)
     {
       xpts.push_back(prev_path.x[i]);
       ypts.push_back(prev_path.y[i]);
@@ -505,13 +652,13 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     if(s > mMap.max_s) s -= mMap.max_s;
     else if(s < 0) s += mMap.max_s;
 
-    std::vector<double> xy = getXY(s, d, mMap.waypoints_s, mMap.waypoints_x, mMap.waypoints_y);
+    std::vector<double> xy = GetHiResXY(s, d, mMap.waypoints_s, mMap.waypoints_x, mMap.waypoints_y);
     xpts.push_back(xy[0]);
     ypts.push_back(xy[1]);
 
-    // #ifdef DEBUG2
-    // std::cout << "t = " << i*TIME_DELTA << " | (s = " << s << ", d = " << d << ") --> (x = " << xy[0] << ", y = " << xy[1] << ")" << std::endl;
-    // #endif
+    #ifdef DEBUG2
+    std::cout << "t = " << i*TIME_DELTA << " | (s = " << s << ", d = " << d << ") --> (x = " << xy[0] << ", y = " << xy[1] << ")" << std::endl;
+    #endif
   }
 
   // Double check the path for smoothness now that we're in the xy space
@@ -524,7 +671,9 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 
   for(int i = 0; i < xpts.size() - smooth_size; ++i)
   {
+    #ifdef DEBUG
     std::cout << " [-] checking window " << first << " to " << nth << std::endl;
+    #endif
 
     bool inc = true;
     std::vector<double> s_xpts;
@@ -533,14 +682,19 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     for(int j = first; j < nth; ++j)
     {
       if(j == first + (smooth_size / 2) + 1) continue;
+
+      #ifdef DEBUG
       std::cout << " [-] Adding (" << xpts[j] << ", " << ypts[j] << ")" << std::endl;
+      #endif
 
       double _x = xpts[j] - mVeh.x;
       double _y = ypts[j] - mVeh.y;
       double x = _x * cos(0-yaw_rad) - _y * sin(0-yaw_rad);
       double y = _x * sin(0-yaw_rad) + _y * cos(0-yaw_rad);
 
+      #ifdef DEBUG
       std::cout << "   - Shifted to (" << x << ", " << y << ")" << std::endl;
+      #endif
 
       if(x < xpts[xpts.size() - 1]){inc = false; break;}
       s_xpts.push_back(x);
@@ -562,7 +716,10 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 
     // Apply
     ypts[first + (smooth_size / 2) + 1] = y;
+
+    #ifdef DEBUG
     std::cout << " [-] smoothing to (" << xpts[first + smooth_size / 2 + 1] << ", " << ypts[first + smooth_size / 2 + 1] << ")" << std::endl;
+    #endif
 
     first++;
     nth++;
@@ -580,7 +737,7 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     j = (a - last_a) / td;
     std::cout << "t = " << i*TIME_DELTA << " | (x = " << xpts[i] << ", y = " << ypts[0] << ") -- "
               << "v = " << v << ", a = " << a << ", j = " << j << std::endl;
-    if(v >= MPH_TO_MPS(50)) std::cout << "HOLY FUCKING SHIT" << std::endl;
+    // if(v >= MPH_TO_MPS(50)) std::cout << "HOLY FUCKING SHIT" << std::endl;
     last_x = xpts[i]; last_y = ypts[i]; last_v = v; last_a = a;
   }
   #endif
@@ -608,7 +765,7 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 Path VirtualDriver::plan_route()
 {
   // Debug state printing
-  #ifdef DEBUG
+  #ifdef DEBUG_LITE
   static int step = 0;
   std::cout << " [+] step: " << step++ << std::endl
             << " [+] road width: " << mRoad.width << std::endl
@@ -641,8 +798,8 @@ Path VirtualDriver::plan_route()
   // Extract the best one
   Trajectory opt = optimal_trajectory(possible_trajectories);
 
-  #ifdef DEBUG
-  std::cout << " [*] Optimal Traj Found! " << std::endl
+  #ifdef DEBUG_LITE
+  std::cout << " [*] Optimal Traj Found!" << std::endl
             << "   - type: " << opt.behavior << std::endl
             << "   - s: " << opt.s << std::endl
             << "   - d: " << opt.d << std::endl
@@ -651,7 +808,7 @@ Path VirtualDriver::plan_route()
   #endif
 
   // Generate the final, follow-able path
-  Path p = generate_path(opt);
+  Path p = generate_smoothed_path(opt);
 
   // Update our current trajectory
   m_cur_s_coeffs = opt.s;

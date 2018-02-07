@@ -6,7 +6,9 @@
 #include "lane_change.h"
 
 #include <iostream>
+
 #define DEBUG
+#define DEBUG_COST
 
 using namespace std;
 
@@ -16,8 +18,8 @@ LaneChange::LaneChange(){
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 5.0; // Coeff for jerk cost
-  k_t = 2.0; // Coeff for time cost
+  k_j = 25.0; // Coeff for jerk cost
+  k_t = 10.0; // Coeff for time cost
   k_s = 1.0; // Coeff for lat movement cost
   k_d = 0.15; // Coeff for lon movement cost
 
@@ -42,26 +44,48 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
   cout << " [-] Determing trajectories for '" << name() << "'" << endl;
   #endif
 
-  // If our lane is going at the max speed, we probably don't need to change
+  // If our lane is going at the max speed, we really don't need to change
   double speed_limit = r.speed_limit;
   int follow_id = o.vehicle_to_follow();
   if(follow_id == -1) return;
+
+  // Otherwise, grab the vehicle object we're following
   Obstacle following = o.get_vehicle(follow_id);
   if(following.s_dot >= speed_limit) return;
 
+  // Don't even look into changing a lane if we're not that close
+  // TO-DO: This is a band-aid, heal this pls
+  if((following.s - si) > 40) return;
+
   // Define constraint ranges
-  double min_T = 1.0;
-  double max_T = 5.0;
+  double target_T = 1.5; // seconds
   double dT = 0.5;
+  double min_T = target_T - 1.0 * dT;
+  double max_T = target_T + 6.0 * dT;
+
   int left = current_lane - 1;
   int right = current_lane + 1;
 
   #ifdef DEBUG
+  cout << " [*] Trying " << 2.0 * ((max_T - min_T) / dT) << " combinations" << endl;
   cout << " [-] Varying given:" << endl
        << "   - T = " << min_T << " and T = " << max_T << endl
        << "   - Right: " << right << endl
        << "   - Left: " << left << endl
        << endl;
+  #endif
+
+  #ifdef DEBUG
+  cout << " [-] Currently following 'Obstacle ID " << follow_id << "' at s = "
+       << following.s << " (Ego S = " << si << ")"
+       << endl;
+  #endif
+
+  #ifdef DEBUG_COST
+  static double max_c = 0.0;
+  static double min_c = 100000000.0;
+  static double avg_c = 0.0;
+  static int N = 0;
   #endif
 
   // vars for maintaining lane obstacle status
@@ -158,6 +182,13 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
 
         // Add traj to our set of possible trajectories
         insert_traj_sorted(t_set, traj);
+
+        #ifdef DEBUG_COST
+        if(c < min_c) min_c = c;
+        if(c > max_c) max_c = c;
+        N++;
+        avg_c = ((avg_c * (N - 1)) + c) / N;
+        #endif
       }
 
       // Finally, see if we can pull in front of the leading car in the lane
@@ -167,6 +198,13 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
       double c = cost2(traj, speed_limit, target_d, speed_limit);
       traj.cost = c;
       insert_traj_sorted(t_set, traj);
+
+      #ifdef DEBUG_COST
+      if(c < min_c) min_c = c;
+      if(c > max_c) max_c = c;
+      N++;
+      avg_c = ((avg_c * (N - 1)) + c) / N;
+      #endif
 
       #ifdef DEBUG
       cout << " [-] Trying T = " << T << ":" << endl
@@ -261,6 +299,13 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
 
         // Add traj to our set of possible trajectories
         insert_traj_sorted(t_set, traj);
+
+        #ifdef DEBUG_COST
+        if(c < min_c) min_c = c;
+        if(c > max_c) max_c = c;
+        N++;
+        avg_c = ((avg_c * (N - 1)) + c) / N;
+        #endif
       }
 
       // Finally, see if we can pull in front of the leading car in the lane
@@ -270,6 +315,13 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
       double c = cost2(traj, speed_limit, target_d, speed_limit);
       traj.cost = c;
       insert_traj_sorted(t_set, traj);
+
+      #ifdef DEBUG_COST
+      if(c < min_c) min_c = c;
+      if(c > max_c) max_c = c;
+      N++;
+      avg_c = ((avg_c * (N - 1)) + c) / N;
+      #endif
 
       #ifdef DEBUG
       cout << " [-] Trying T = " << T << ":" << endl
@@ -282,9 +334,16 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
       #endif
     }
   }
+
+  #ifdef DEBUG_COST
+  cout << " [*] Behavior '" << name() << "' cost stats:" << endl
+       << "   - Average: " << avg_c << endl
+       << "   - max: " << max_c << endl
+       << "   - min: " << min_c << endl;
+  #endif
 }
 
-// derp derp derp
+// Cost function for trajectories that were created by merging in between two cars
 double LaneChange::cost(const Trajectory &traj, const double &target_s, const double &target_d, const double &target_s_dot) const {
 
   // Difference between target speed and final speed
@@ -304,8 +363,8 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   double J_t_lon = 0.0;
   for(double t = 0.0; t <= traj.T; t += dt)
   {
-    V_t_lat += traj.s.get_velocity_at(t) * traj.s.get_velocity_at(t);
-    V_t_lon += traj.d.get_velocity_at(t) * traj.d.get_velocity_at(t);
+    // V_t_lat += traj.s.get_velocity_at(t) * traj.s.get_velocity_at(t);
+    // V_t_lon += traj.d.get_velocity_at(t) * traj.d.get_velocity_at(t);
 
     A_t_lat += traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
     A_t_lon += traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
@@ -313,6 +372,16 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
     J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
     J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
+
+  // Massive penalty for changing lanes when theres not much of an
+  // advantage
+  double si_dot = traj.s.get_velocity_at(0); // speed we WERE going
+  double sf_dot = traj.s.get_velocity_at(traj.T);
+  double C_lane_speed_adv;
+  if(abs(sf_dot - si_dot) < 0.0001)
+    C_lane_speed_adv = 10000;
+  else
+    C_lane_speed_adv = 1.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
 
   // Penalty for being far from the target speed
   double s_dot_f = traj.s.get_velocity_at(traj.T);
@@ -333,13 +402,14 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
-  double C_extra = V_t_lat + V_t_lon + A_t_lat + A_t_lon + 6.0*speed_pen;
+  double C_extra = V_t_lat + V_t_lon + 10.0 * (A_t_lat + A_t_lon) + 6.0*speed_pen + C_lane_speed_adv;
 
   // Return the combined trajectory cost
   return k_lat * C_lat + k_lon * C_lon + C_extra;
 }
 
-// derp derp derp
+// Cost function for trajectories that were created by choosing a target
+// velocity and time
 double LaneChange::cost2(const Trajectory &traj, const double &target_speed, const double &target_d, const double &speed_limit) const {
 
   // Difference between target speed and final speed
@@ -359,8 +429,8 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   double J_t_lon = 0.0;
   for(double t = 0.0; t <= traj.T; t += dt)
   {
-    V_t_lat += traj.s.get_velocity_at(t) * traj.s.get_velocity_at(t);
-    V_t_lon += traj.d.get_velocity_at(t) * traj.d.get_velocity_at(t);
+    // V_t_lat += traj.s.get_velocity_at(t) * traj.s.get_velocity_at(t);
+    // V_t_lon += traj.d.get_velocity_at(t) * traj.d.get_velocity_at(t);
 
     A_t_lat += traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
     A_t_lon += traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
@@ -368,6 +438,15 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
     J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
     J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
+
+  // Massive penalty for changing lanes when theres not much of an
+  // advantage
+  double si_dot = traj.s.get_velocity_at(0); // speed we WERE going
+  double C_lane_speed_adv;
+  if(abs(sf_dot - si_dot) < 5.0)
+    C_lane_speed_adv = 10000.0;
+  else
+    C_lane_speed_adv = 10000.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
 
   // Penalize driving slower than the speed limit to try to encourage
   // our ego to change lanes
@@ -388,7 +467,7 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
-  double C_extra = V_t_lat + V_t_lon + A_t_lat + A_t_lon + 2.0*speed_slow;
+  double C_extra = V_t_lat + V_t_lon + 10.0 * (A_t_lat + A_t_lon) + 2.0*speed_slow + C_lane_speed_adv;
 
   // Return the combined trajectory cost
   return k_lat * C_lat + k_lon * C_lon + speed_slow;

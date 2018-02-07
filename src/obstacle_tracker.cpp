@@ -2,7 +2,8 @@
 
 #include <iostream>
 using namespace std;
-#define DEBUG
+// #define DEBUG
+#define DEBUG_LITE
 
 // Receive Sensor Fusion Updates
 // These come in with an ID for the object and an (x,y), (s,d) and (vx, vy)
@@ -253,7 +254,7 @@ void ObstacleTracker::update(const long &ts, std::vector<Obstacle> &obs, const V
       m_obstacles.erase(it++);
     }
     else {
-      #ifdef DEBUG
+      #ifdef DEBUG_LITE
       std::cout << " [+] Object ID = " << (*it).second.current().id << " - ("
                 << "s = " << (*it).second.current().s
                 << ", d = " << (*it).second.current().d
@@ -269,7 +270,7 @@ void ObstacleTracker::update(const long &ts, std::vector<Obstacle> &obs, const V
   }
 
   // debug lane status
-  #ifdef DEBUG
+  #ifdef DEBUG_LITE
   std::cout << " [*] Lane Status:" << std::endl;
   int veh_lane = m_road.get_vehicle_lane(m_veh);
   for(int i = 0; i < m_lanes.size(); ++i)

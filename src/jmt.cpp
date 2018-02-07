@@ -8,7 +8,7 @@ using Eigen::MatrixXd;
 using Eigen::VectorXd;
 using Eigen::Vector2d;
 
-JMT::JMT(){this->coeffs = VectorXd(6);}
+JMT::JMT(){this->coeffs = VectorXd::Zero(6);}
 JMT::~JMT(){}
 
 // Create a JMT given both the known start and end states and the over which you want the
@@ -150,9 +150,14 @@ double JMT::get_jerk_at(const double t) const {
 std::ostream& operator<<(std::ostream &os, const JMT &val)
 {
   bool written_first = false;
+  int z_count = 0;
   for(int i = 5; i >= 0; --i)
   {
-    if(val.coeffs[i] == 0) continue;
+    if(val.coeffs[i] == 0)
+    {
+      z_count++;
+      continue;
+    }
 
     if(!written_first){
       if(val.coeffs[i] < 0) os << "-";
@@ -161,10 +166,11 @@ std::ostream& operator<<(std::ostream &os, const JMT &val)
     else os << (val.coeffs[i] < 0 ? " - " : " + ");
 
     if(i != 0){
-      os << (val.coeffs[i] < 0 ? val.coeffs[i]*-1 : val.coeffs[i]) << "x";
+      os << (val.coeffs[i] < 0 ? val.coeffs[i] * -1.0 : val.coeffs[i]) << "x";
       if(i != 1) os << "^" << i;
     }
     else os << val.coeffs[i];
   }
+  if(z_count == 6) os << "0";
   return os;
 }
