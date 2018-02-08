@@ -8,6 +8,7 @@
 
 #include "behavior.h"
 #include "trajectory.h"
+#include <cmath>
 
 class LaneKeep: public Behavior {
   public:
@@ -19,7 +20,7 @@ class LaneKeep: public Behavior {
                           const int &current_lane, const Road &r,
                           ObstacleTracker &o) const;
 
-    double cost(const Trajectory &traj, const double &target_speed, const double &speed_limit, const double &target_d) const;
+    double cost(const Trajectory &traj, const double &target_speed, const double &speed_limit, const double &target_d, const double &follow_ds) const;
 
     std::string name() const;
 

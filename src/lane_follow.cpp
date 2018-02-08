@@ -6,8 +6,8 @@
 #include "lane_follow.h"
 
 #include <iostream>
-#define DEBUG
-#define DEBUG_COST
+// #define DEBUG
+// #define DEBUG_COST
 
 using namespace std;
 
@@ -18,8 +18,8 @@ LaneFollow::LaneFollow(){
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 25.0; // Coeff for jerk cost
-  k_t = 10.0; // Coeff for time cost
+  k_j = 2.0; // Coeff for jerk cost
+  k_t = 20.0; // Coeff for time cost
   k_s = 50.0; // Coeff for lat movement cost
   k_d = 5.0; // Coeff for lon movement cost
 
@@ -92,7 +92,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   #endif
 
   // generate our trajectories
-  for(double T = min_T; T < max_T; T += dT)
+  for(double T = min_T; T <= max_T; T += dT)
   {
     // Predict where the following car will be in T seconds
     double follow_s_final = follow_s + follow_s_dot * T + 0.5 * follow_a * T * T;
@@ -154,6 +154,18 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
 }
 
 // Calculate a cost for this behavior
+// For following, we basically want to follow when:
+//   1) We're too close to a car in front of us
+//   2) We can't alen change
+// Thus, what this cost function should aim to do is:
+//   1) Pick the best following trajectory we can given
+//      jerk and acceleration WITHOUT letting those costs
+//      be great enough to discourage the act all together
+//   2) Penalize wanting to lane follow SLOWLY, to help us
+//      differentiate between following and changing
+//   3) Penalize following from far away such that we would
+//      rather keep lane and get closer to traffic, maybe
+//      to change lanes
 double LaneFollow::cost(const Trajectory &traj, const double &target_s, const double &target_d, const double &target_s_dot, const double &speed_limit) const {
 
   // Difference between target position and final position
@@ -165,40 +177,31 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s, const do
   double d_delta_2 = (df - target_d) * (df - target_d);
 
   // Jerk cost is summed up over the path for both trajectories
-  double V_t_lat = 0.0;
-  double V_t_lon = 0.0;
   double A_t_lat = 0.0;
   double A_t_lon = 0.0;
   double J_t_lat = 0.0;
   double J_t_lon = 0.0;
   for(double t = 0.0; t <= traj.T; t += dt)
   {
-    // V_t_lat += traj.s.get_velocity_at(t) * traj.s.get_velocity_at(t);
-    // V_t_lon += traj.d.get_velocity_at(t) * traj.d.get_velocity_at(t);
+    // Penalize Acceleration over the trajectories
+    A_t_lat += 0.01 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
+    A_t_lon += 0.01 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
 
-    A_t_lat += traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
-    A_t_lon += traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
-
+    // Penalize Jerk over the trajectories
     J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
     J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
 
-  // Penalty for being far away from the target car to encourage the ego
-  // to keep lane and catch up
-  double C_follow_dist = (sf - target_s) * (sf - target_s);
-
-  // Penalty for being far from the target following speed
-  double sf_dot = traj.s.get_velocity_at(traj.T);
-  double C_speed_pen = (sf_dot - target_s_dot) * (sf_dot - target_s_dot);
-
   // Penalize driving slower than the speed limit to try to encourage
   // our ego to keep or change lanes
-  double C_speed_slow = (sf_dot - speed_limit) * (sf_dot - speed_limit);
+  // MIN: 0, MAX: 50*50 --> 2500
+  double sf_dot = traj.s.get_velocity_at(traj.T);
+  double C_speed_limit = (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed
   //             (  JERK COST  )   (  TIME COST )   (      LAT COST     )
-  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_s * s_delta_2) + V_t_lat + A_t_lat;
+  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_s * s_delta_2);
 
   // Get the total Longitudinal Trajectory cost
   // d cost is chosen as (df - target_d)^2 because we ideally converge on
@@ -207,10 +210,27 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s, const do
   // be working on converging the whole time. We dont want to punish slow
   // convergence because it actually might be ideal and most comfortable!
   //             (  JERK COST  )   (  TIME COST )   (    LON COST   )
-  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2) + V_t_lon + A_t_lon;
+  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
-  double C_extra = V_t_lat + V_t_lon + 25.0 * (A_t_lat + A_t_lon) + 5.0 * C_speed_slow + C_speed_pen + 100.0 * C_follow_dist;
+  double C_extra = (A_t_lat + A_t_lon) + C_speed_limit;
+
+  #ifdef DEBUG_COST
+  cout << " [*] Cost Breakdown:" << endl
+       << "   - Sf_FINAL: " << sf_dot << endl
+       << "   - Time Frame: " << traj.T << endl
+       << "   - C_lat: " << k_lat * C_lat << endl
+       << "     - J_lat: " << (k_j * J_t_lat) << endl
+       << "   - C_lon: " << k_lon * C_lon << endl
+       << "     - J_lon: " << (k_j * J_t_lon) << endl
+       << "   - C_time: " << (k_t * traj.T) << endl
+       << "   - C_extra: " << C_extra << endl
+       << "     - A_Lat: " << A_t_lat << endl
+       << "     - A_Lon: " << A_t_lon << endl
+       << "     - A_comb: " << (A_t_lat + A_t_lon) << endl
+       << "     - speed_limit_delta: " << C_speed_limit << endl
+       << "   - TOTAL: " << k_lat * C_lat + k_lon * C_lon + C_extra << endl;
+  #endif
 
   // Return the combined trajectory cost
   return k_lat * C_lat + k_lon * C_lon + C_extra;

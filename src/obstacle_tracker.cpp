@@ -2,6 +2,7 @@
 
 #include <iostream>
 using namespace std;
+
 // #define DEBUG
 #define DEBUG_LITE
 
@@ -268,29 +269,70 @@ void ObstacleTracker::update(const long &ts, std::vector<Obstacle> &obs, const V
       ++it;
     }
   }
+}
 
-  // debug lane status
-  #ifdef DEBUG_LITE
-  std::cout << " [*] Lane Status:" << std::endl;
+std::string ObstacleTracker::get_debug_lanes()
+{
+  double p_res = 2.0;
+
+  vector<stringstream> lane_strs;
+  lane_strs.resize(m_lanes.size());
+
   int veh_lane = m_road.get_vehicle_lane(m_veh);
   for(int i = 0; i < m_lanes.size(); ++i)
   {
-    bool saw = false;
-    std::cout << "   - [" << i << ", s: " << lane_speed(i) << "]: . . . ";
-    for(auto it = m_lanes[i].begin(); it != m_lanes[i].end(); ++it)
+    // keep track of the next veh to draw for the lane
+    auto it = m_lanes[i].begin();
+    double o_s = m_obstacles[*it].s();
+
+    for(double s = m_veh.s - m_view_distance; s <= m_veh.s + m_view_distance + p_res; s += p_res)
     {
-      if(i == veh_lane && !saw && m_veh.s < m_obstacles[*it].s())
+      if(m_veh.s < o_s)
       {
-        saw = true;
-        std::cout << "(E) . . . ";
+        if(i == veh_lane && (m_veh.s >= s && m_veh.s < s + p_res))
+        {
+          lane_strs[i] << "(US)";
+        }
+        else if(it != m_lanes[i].end() && (o_s >= s && o_s < s + p_res))
+        {
+          lane_strs[i] << "(" << *it << ")";
+          ++it;
+          if(it != m_lanes[i].end()) o_s = m_obstacles[*it].s();
+        }
+        else
+        {
+          lane_strs[i] << ".";
+        }
       }
-      std::cout << "(" << *it << ") . . . ";
+      else
+      {
+        if(it != m_lanes[i].end() && (o_s >= s && o_s < s + p_res))
+        {
+          lane_strs[i] << "(" << *it << ")";
+          ++it;
+          if(it != m_lanes[i].end()) o_s = m_obstacles[*it].s();
+        }
+        else if(i == veh_lane && (m_veh.s >= s && m_veh.s < s + p_res))
+        {
+          lane_strs[i] << "(US)";
+        }
+        else
+        {
+          lane_strs[i] << ".";
+        }
+      }
     }
-    if(i == veh_lane && !saw)
-        std::cout << "(E) . . . ";
-    std::cout << std::endl;
   }
-  #endif
+
+  // Build return value
+  stringstream s;
+  s << " [*] Lane Status:\n";
+  for(int i = 0; i < lane_strs.size(); ++i)
+  {
+    s << "   - [" << i << ", spd: " << std::setprecision(6) << lane_speed(i) << "]\t"
+      << lane_strs[i].str() << "\n";
+  }
+  return s.str();
 }
 
 int ObstacleTracker::vehicle_to_follow()

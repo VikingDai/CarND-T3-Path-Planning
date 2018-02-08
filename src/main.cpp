@@ -16,7 +16,7 @@
 using namespace std;
 using namespace std::chrono;
 
-#define DEBUG
+// #define DEBUG
 
 // for convenience
 using json = nlohmann::json;
@@ -100,7 +100,7 @@ int main()
   // Load our Road, plus current (only...) settings
   // Each Lane is 4m wide, with 3 lanes in total
   // Speed limit on this road is 50MPH
-  Road r = Road({Lane(4), Lane(4), Lane(4)}, 48);
+  Road r = Road({Lane(4), Lane(4), Lane(4)}, 49);
 
   // Load our Virtual Driver
   Vehicle v = Vehicle();
@@ -147,7 +147,7 @@ int main()
           getSimulatorUpdates(ts, j, v, obs, prev_path);
 
           #ifdef DEBUG
-          std::cout << "---------------------------------------------------------" << endl
+          std::cerr << "---------------------------------------------------------" << endl
                     << " [-] Timestep: " << ts << endl;
           #endif
 

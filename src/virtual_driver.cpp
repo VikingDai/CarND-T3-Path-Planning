@@ -1,13 +1,13 @@
 #include "virtual_driver.h"
 
 #include <iostream>
+#include <sstream>
 
 using namespace std;
 
 // TO-DO: Define some debug header maybe so it can be cross file?
-// #define DEBUG
-// #define DEBUG2
-#define DEBUG_LITE
+#define CLI_OUTPUT
+#define DEBUG
 
 /******************************************************************************
 * Utility Functions and Helpers                                               *
@@ -148,7 +148,8 @@ static std::vector<double> getXY(double s, double d, const std::vector<double> &
 std::vector<double> GetHiResXY(double s, double d,
                                const std::vector<double> &map_s,
                                const std::vector<double> &map_x,
-                               const std::vector<double> &map_y) {
+                               const std::vector<double> &map_y)
+{
 
   // Wrap around s
   s = std::fmod(s, 6945.554);
@@ -249,10 +250,6 @@ VirtualDriver::VirtualDriver(const Vehicle initial_status, const Road &r,
 // Update First car in front and behind for each lane
 void VirtualDriver::sensor_fusion_updates(const long &ts, std::vector<Obstacle> &obs)
 {
-  #ifdef DEBUG
-  std::cout << " [*] Received " << obs.size() << " sensor fusion updates" << std::endl;
-  #endif
-
   m_tracker.update(ts, obs, mVeh, mRoad);
 }
 
@@ -316,10 +313,6 @@ void VirtualDriver::path_history_update(const Path &prev)
 // around us
 TrajectorySet VirtualDriver::generate_trajectories()
 {
-  #ifdef DEBUG
-  std::cout << " [-] Generating possible trajectories!" << std::endl;
-  #endif
-
   // Trajectory set to return
   TrajectorySet n_possible_trajectories;
 
@@ -351,10 +344,6 @@ TrajectorySet VirtualDriver::generate_trajectories()
   // we know of
   if(m_prev_points_left == 0)
   {
-    #ifdef DEBUG
-    std::cout << " [*] Overriding Default Parameters - No points from last known path " << std::endl;
-    #endif
-
     // Special initial take off state
     si = mVeh.s;
     si_dot = 0;
@@ -364,7 +353,7 @@ TrajectorySet VirtualDriver::generate_trajectories()
     di_dot_dot = 0;
   }
 
-  #ifdef DEBUG_LITE
+  #ifdef DEBUG
   std::cout << " [*] Starting Parameters:" << std::endl
               << "  - si:    " << si << std::endl
               << "  - si_d:  " << si_dot << std::endl
@@ -381,12 +370,8 @@ TrajectorySet VirtualDriver::generate_trajectories()
   // can follow.
   for(int i = 0; i < m_vehicle_behaviors.size(); ++i)
   {
-    #ifdef DEBUG_LITE
-
     #ifdef DEBUG
     std::cout << " [*] Behavior " << i + 1 << ": " << m_vehicle_behaviors[i]->name() << std::endl;
-    #endif
-
     int t_count = n_possible_trajectories.size();
     #endif
 
@@ -396,7 +381,7 @@ TrajectorySet VirtualDriver::generate_trajectories()
                                              current_lane, mRoad,
                                              m_tracker);
 
-    #ifdef DEBUG_LITE
+    #ifdef DEBUG
     std::cout << " [+] Added " << n_possible_trajectories.size() - t_count
               << " for '" << m_vehicle_behaviors[i]->name() << "'" << std::endl;
     #endif
@@ -426,7 +411,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   double last_x = mVeh.x, last_y = mVeh.y, last_v = mVeh.speed;
 
   // For averaging/gating the acceleration
-  double MAX_ACC_MAG = 5.0;
+  double MAX_ACC_MAG = 3.3;
   int window_size = 10;
   int acc_ins = 0;
   double dt = window_size * TIME_DELTA;
@@ -537,19 +522,6 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
   // TO-DO: What the heck do people do in real life here? Emergency stop?
   Trajectory def = Trajectory(m_cur_s_coeffs, m_cur_d_coeffs, 0);
 
-  #ifdef DEBUG_LITE
-  std::cout << " [*] oh noooooooo we aint got nothing that works" << std::endl;
-  #endif
-
-  #ifdef DEBUG
-  std::cout << " [*] Old Trajectory:" << std::endl
-            << "   - type: " << (def).behavior << std::endl
-            << "   - s: " << (def).s << std::endl
-            << "   - d: " << (def).d << std::endl
-            << "   - cost: " << (def).cost << std::endl
-            << "   - T: " << (def).T << std::endl;
-  #endif
-
   return def;
 }
 
@@ -570,11 +542,6 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
   double td = TIME_DELTA;
   int n = m_planning_horizon;
 
-  // Calculate an index based on how many dots have been eaten
-  // and how many we've decided to consistently plan out to
-  int start_ind = m_planning_horizon - m_prev_points_left - 1;
-  double start_time = start_ind * TIME_DELTA;
-
   // To contain points for the final path object
   std::vector<double> xpts;
   std::vector<double> ypts;
@@ -583,19 +550,8 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
   // Generate the path
   for (int i = 0; i < n; ++i)
   {
-    if(start_ind < m_planning_horizon - 1 && i < -100000)
-    {
-      // s = m_cur_s_coeffs.at(start_time + ((double) i) * td);
-      // d = m_cur_d_coeffs.at(start_time + ((double) i) * td);
-      xpts.push_back(prev_path.x[i]);
-      ypts.push_back(prev_path.y[i]);
-      continue;
-    }
-    else
-    {
-      s = jmt_s.at(((double) i) * td);
-      d = jmt_d.at(((double) i) * td);
-    }
+    s = jmt_s.at(((double) i) * td);
+    d = jmt_d.at(((double) i) * td);
 
     // Check if the (s, _) point falls outside the map, which
     // can happen because the JMT doesn't care!
@@ -606,9 +562,9 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
     xpts.push_back(xy[0]);
     ypts.push_back(xy[1]);
 
-    #ifdef DEBUG2
-    std::cout << "t = " << i*TIME_DELTA << " | (s = " << s << ", d = " << d << ") --> (x = " << xy[0] << ", y = " << xy[1] << ")" << std::endl;
-    #endif
+    // #ifdef DEBUG
+    // std::cout << "t = " << i*TIME_DELTA << " | (s = " << s << ", d = " << d << ") --> (x = " << xy[0] << ", y = " << xy[1] << ")" << std::endl;
+    // #endif
   }
 
   return Path(xpts, ypts);
@@ -640,12 +596,12 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     double s = jmt_s.at(((double) i) * td);
     double d = jmt_d.at(((double) i) * td);
 
-    if(start_ind < m_planning_horizon - 1 && i < 0)
-    {
-      xpts.push_back(prev_path.x[i]);
-      ypts.push_back(prev_path.y[i]);
-      continue;
-    }
+    // if(start_ind < m_planning_horizon - 1 && i < 0)
+    // {
+    //   xpts.push_back(prev_path.x[i]);
+    //   ypts.push_back(prev_path.y[i]);
+    //   continue;
+    // }
 
     // Check if the (s, _) point falls outside the map, which
     // can happen because the JMT doesn't care!
@@ -655,10 +611,6 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     std::vector<double> xy = GetHiResXY(s, d, mMap.waypoints_s, mMap.waypoints_x, mMap.waypoints_y);
     xpts.push_back(xy[0]);
     ypts.push_back(xy[1]);
-
-    #ifdef DEBUG2
-    std::cout << "t = " << i*TIME_DELTA << " | (s = " << s << ", d = " << d << ") --> (x = " << xy[0] << ", y = " << xy[1] << ")" << std::endl;
-    #endif
   }
 
   // Double check the path for smoothness now that we're in the xy space
@@ -671,10 +623,6 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 
   for(int i = 0; i < xpts.size() - smooth_size; ++i)
   {
-    #ifdef DEBUG
-    std::cout << " [-] checking window " << first << " to " << nth << std::endl;
-    #endif
-
     bool inc = true;
     std::vector<double> s_xpts;
     std::vector<double> s_ypts;
@@ -683,18 +631,10 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
     {
       if(j == first + (smooth_size / 2) + 1) continue;
 
-      #ifdef DEBUG
-      std::cout << " [-] Adding (" << xpts[j] << ", " << ypts[j] << ")" << std::endl;
-      #endif
-
       double _x = xpts[j] - mVeh.x;
       double _y = ypts[j] - mVeh.y;
       double x = _x * cos(0-yaw_rad) - _y * sin(0-yaw_rad);
       double y = _x * sin(0-yaw_rad) + _y * cos(0-yaw_rad);
-
-      #ifdef DEBUG
-      std::cout << "   - Shifted to (" << x << ", " << y << ")" << std::endl;
-      #endif
 
       if(x < xpts[xpts.size() - 1]){inc = false; break;}
       s_xpts.push_back(x);
@@ -716,32 +656,24 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 
     // Apply
     ypts[first + (smooth_size / 2) + 1] = y;
-
-    #ifdef DEBUG
-    std::cout << " [-] smoothing to (" << xpts[first + smooth_size / 2 + 1] << ", " << ypts[first + smooth_size / 2 + 1] << ")" << std::endl;
-    #endif
-
     first++;
     nth++;
   }
 
-  // watch the velocity, acceleration and jerk
-  double last_x = mVeh.x, last_y = mVeh.y, last_v = mVeh.speed, last_a = 0;
-  double v, a, j;
-
-  #ifdef DEBUG
-  for(int i = 0; i < xpts.size(); ++i)
-  {
-    v = distance(xpts[i], ypts[i], last_x, last_y) / td;
-    a = (v - last_v) / td;
-    j = (a - last_a) / td;
-    std::cout << "t = " << i*TIME_DELTA << " | (x = " << xpts[i] << ", y = " << ypts[0] << ") -- "
-              << "v = " << v << ", a = " << a << ", j = " << j << std::endl;
-    // if(v >= MPH_TO_MPS(50)) std::cout << "HOLY FUCKING SHIT" << std::endl;
-    last_x = xpts[i]; last_y = ypts[i]; last_v = v; last_a = a;
-  }
-  #endif
-
+  // watch the velocity, acceleration and jerk + output path
+  // #ifdef DEBUG
+  // double last_x = mVeh.x, last_y = mVeh.y, last_v = mVeh.speed, last_a = 0;
+  // double v, a, j;
+  // for(int i = 0; i < xpts.size(); ++i)
+  // {
+  //   v = distance(xpts[i], ypts[i], last_x, last_y) / td;
+  //   a = (v - last_v) / td;
+  //   j = (a - last_a) / td;
+  //   std::cout << "t = " << i*TIME_DELTA << " | (x = " << xpts[i] << ", y = " << ypts[0] << ") -- "
+  //             << "v = " << v << ", a = " << a << ", j = " << j << std::endl;
+  //   last_x = xpts[i]; last_y = ypts[i]; last_v = v; last_a = a;
+  // }
+  // #endif
 
   return Path(xpts, ypts);
 }
@@ -765,19 +697,18 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 Path VirtualDriver::plan_route()
 {
   // Debug state printing
-  #ifdef DEBUG_LITE
+  #ifdef CLI_OUTPUT
   static int step = 0;
-  std::cout << " [+] step: " << step++ << std::endl
-            << " [+] road width: " << mRoad.width << std::endl
-            << " [+] vehicle (x, y) / (s, d): (" << mVeh.x << ", "
-            << mVeh.y << ") / (" << mVeh.s << ", " << mVeh.d << ")" << std::endl
-            << " [+] vehicle lane: " << mRoad.get_vehicle_lane(mVeh)
-            << std::endl
-            << " [+] vehicle speed: " << mVeh.speed << " m/s | "
-            << MPS_TO_MPH(mVeh.speed) << " mph" << std::endl
-            << " [+] road speed limit: " << MPS_TO_MPH(mRoad.speed_limit) << " mph | "
-            << mRoad.speed_limit << " m/s"
-            << std::endl;
+  std::stringstream ss;
+  ss << " [+] step: " << step++ << "\n"
+     << " [+] road speed limit: " << MPS_TO_MPH(mRoad.speed_limit) << " mph | "
+     << mRoad.speed_limit << " m/s\n"
+     << " [+] road width: " << mRoad.width << "\n"
+     << " [+] vehicle (x, y) / (s, d): (" << mVeh.x << ", "
+     << mVeh.y << ") / (" << mVeh.s << ", " << mVeh.d << ")\n"
+     << " [+] vehicle lane: " << mRoad.get_vehicle_lane(mVeh) << "\n"
+     << " [+] vehicle speed: " << mVeh.speed << " m/s | "
+     << MPS_TO_MPH(mVeh.speed) << " mph" << "\n";
   #endif
 
   // TRAJECTORY POOLING:
@@ -798,7 +729,21 @@ Path VirtualDriver::plan_route()
   // Extract the best one
   Trajectory opt = optimal_trajectory(possible_trajectories);
 
-  #ifdef DEBUG_LITE
+  #ifdef CLI_OUTPUT
+  ss << m_tracker.get_debug_lanes();
+  ss << " [*] Behavior: " << opt.behavior << " (" << opt.cost << ")" << "\n"
+     << " [*] Target time: " << opt.T << "\n"
+     << " [*] Target sf_dot: " << opt.s.get_velocity_at(opt.T) << " m/s | "
+     << MPS_TO_MPH(opt.s.get_velocity_at(opt.T)) << " mph\n";
+
+  std::cerr << "\033[?25l" << std::flush; // hide cursor for update
+  std::cerr << "\033[1J" << std::flush; // clear entire screen above
+  std::cerr << "\033[1;1H" << std::flush; // Move to (1, 1) <-- 1 indexed
+  std::cerr << ss.str() << std::flush;
+  std::cerr << "\033[?25h" << std::flush; // show cursor again
+  #endif
+
+  #ifdef DEBUG
   std::cout << " [*] Optimal Traj Found!" << std::endl
             << "   - type: " << opt.behavior << std::endl
             << "   - s: " << opt.s << std::endl

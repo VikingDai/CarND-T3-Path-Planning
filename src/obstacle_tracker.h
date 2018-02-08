@@ -12,6 +12,8 @@
 #include <map>
 #include <list>
 #include <vector>
+#include <sstream>
+#include <iomanip>
 
 #include "road.h"
 #include "obstacle.h"
@@ -120,6 +122,9 @@ class ObstacleTracker {
     // collision free. Conservatively predicts the behavior of
     // all the tracked vehicles based on what they've done so far.
     bool trajectory_is_safe(const Trajectory &traj);
+
+    // Debug output
+    std::string get_debug_lanes();
 
     // Attributes of our tracker
     // Note: some of this is due to the nature of the simulator, some is needed
