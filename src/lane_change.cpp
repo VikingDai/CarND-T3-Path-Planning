@@ -12,9 +12,10 @@
 
 using namespace std;
 
-LaneChange::LaneChange(){
+LaneChange::LaneChange()
+{
   distance_buffer = 0.0; // meters, fixed distance of safety past a time gap
-  time_gap = 1.0;        // seconds,
+  time_gap = 0.5;        // seconds,
 
   dt = 0.05;  // time delta for summing integral costs
 
@@ -38,7 +39,8 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
                                   double si, double si_dot, double si_dot_dot,
                                   double di, double di_dot, double di_dot_dot,
                                   const int &current_lane, const Road &r,
-                                  ObstacleTracker &o) const {
+                                  ObstacleTracker &o) const
+{
 
   #ifdef DEBUG
   cout << " [-] Determing trajectories for '" << name() << "'" << endl;
@@ -61,7 +63,7 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
   double target_T = 1.5; // seconds
   double dT = 0.5;
   double min_T = target_T - 1.0 * dT;
-  double max_T = target_T + 6.0 * dT;
+  double max_T = target_T + 9.0 * dT;
 
   int left = current_lane - 1;
   int right = current_lane + 1;
@@ -356,7 +358,16 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
 }
 
 // Cost function for trajectories that were created by merging in between two cars
-double LaneChange::cost(const Trajectory &traj, const double &target_s, const double &target_d, const double &target_s_dot, const double &follow_sf) const {
+// This cost function should:
+//   1) Encourage lane changes that merge between two cars when the
+//      Lane speed is significantly higher than the current lane
+//   2) Encourage lane changes between cars when the car that it would
+//      change in front of is far away. Speed penalty might even scale
+//      with final following distance
+//   3) Should discourage lane changes behind a car that is close
+//      when the speed gained is very little --> thus encourage
+//      lane following or keeping instead
+double LaneChange::cost(const Trajectory &traj, const double &target_s, const double &target_d, const double &speed_limit, const double &follow_sf) const {
 
   // Difference between target speed and final speed
   double sf = traj.s.get_position_at(traj.T);
@@ -382,17 +393,18 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
     J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
 
-  // Massive penalty for changing lanes when theres not much of an
+  // penalty for changing lanes when theres not much of an
   // advantage
   double si_dot = traj.s.get_velocity_at(0); // speed we WERE going
-  double sf_dot = traj.s.get_velocity_at(traj.T);
+  double sf_dot = traj.s.get_velocity_at(traj.T); // speed we would get to
   double C_lane_speed_adv = 0.0;
-  if(abs(sf_dot - si_dot) < 2.0) C_lane_speed_adv = 10000.0;
-  // else
-  //   C_lane_speed_adv = 1.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
+  if(abs(sf_dot - si_dot) < 0.1)
+    C_lane_speed_adv = 10000.0;
+  else
+     C_lane_speed_adv = 75.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
 
   // Penalty for being far from the target speed
-  double C_speed_limit = (sf_dot - target_s_dot) * (sf_dot - target_s_dot);
+  double C_speed_limit = 1.5 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Penalty for merging into someone where the car you're following is
   // close - only for this guy since the other cost assumes theres no
@@ -440,7 +452,15 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
 }
 
 // Cost function for trajectories that were created by choosing a target
-// velocity and time
+// velocity and time. This cost function should:
+//   1) Encourage lane changes that merge between two cars when the
+//      Lane speed is significantly higher than the current lane
+//   2) Encourage lane changes between cars when the car that it would
+//      change in front of is far away. Speed penalty might even scale
+//      with final following distance
+//   3) Should discourage lane changes behind a car that is close
+//      when the speed gained is very little --> thus encourage
+//      lane following or keeping instead
 double LaneChange::cost2(const Trajectory &traj, const double &target_speed, const double &target_d, const double &speed_limit) const {
 
   // Difference between target speed and final speed
@@ -470,7 +490,10 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   // change lanes less.
   double si_dot = traj.s.get_velocity_at(0); // speed we WERE going
   double C_lane_speed_adv = 0.0;
-  if(abs(sf_dot - si_dot) < 2.0) C_lane_speed_adv = 10000.0;
+  if(abs(sf_dot - si_dot) < 0.1)
+    C_lane_speed_adv = 10000.0;
+  else
+     C_lane_speed_adv = 75.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
 
   // Penalize driving slower than the speed limit to try to encourage
   // our ego to change lanes into the fastest lane possible

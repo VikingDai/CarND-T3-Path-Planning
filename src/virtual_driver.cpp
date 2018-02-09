@@ -411,7 +411,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   double last_x = mVeh.x, last_y = mVeh.y, last_v = mVeh.speed;
 
   // For averaging/gating the acceleration
-  double MAX_ACC_MAG = 3.3;
+  double MAX_ACC_MAG = 3.15;
   int window_size = 10;
   int acc_ins = 0;
   double dt = window_size * TIME_DELTA;

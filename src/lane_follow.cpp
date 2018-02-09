@@ -6,8 +6,8 @@
 #include "lane_follow.h"
 
 #include <iostream>
-// #define DEBUG
-// #define DEBUG_COST
+#define DEBUG
+#define DEBUG_COST
 
 using namespace std;
 

@@ -283,11 +283,13 @@ std::string ObstacleTracker::get_debug_lanes()
   {
     // keep track of the next veh to draw for the lane
     auto it = m_lanes[i].begin();
-    double o_s = m_obstacles[*it].s();
+    double o_s = 0.0;
+    if(it != m_lanes[i].end())
+    o_s = m_obstacles[*it].s();
 
     for(double s = m_veh.s - m_view_distance; s <= m_veh.s + m_view_distance + p_res; s += p_res)
     {
-      if(m_veh.s < o_s)
+      if(it == m_lanes[i].end() || m_veh.s < o_s)
       {
         if(i == veh_lane && (m_veh.s >= s && m_veh.s < s + p_res))
         {
@@ -297,7 +299,8 @@ std::string ObstacleTracker::get_debug_lanes()
         {
           lane_strs[i] << "(" << *it << ")";
           ++it;
-          if(it != m_lanes[i].end()) o_s = m_obstacles[*it].s();
+          if(it != m_lanes[i].end())
+            o_s = m_obstacles[*it].s();
         }
         else
         {
@@ -310,7 +313,8 @@ std::string ObstacleTracker::get_debug_lanes()
         {
           lane_strs[i] << "(" << *it << ")";
           ++it;
-          if(it != m_lanes[i].end()) o_s = m_obstacles[*it].s();
+          if(it != m_lanes[i].end())
+            o_s = m_obstacles[*it].s();
         }
         else if(i == veh_lane && (m_veh.s >= s && m_veh.s < s + p_res))
         {

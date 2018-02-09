@@ -7,7 +7,7 @@
 
 #include <iostream>
 // #define DEBUG
-// #define DEBUG_COST
+#define DEBUG_COST
 
 using namespace std;
 
@@ -15,7 +15,7 @@ LaneKeep::LaneKeep(){
   dt = 0.05;  // time delta for summing integral costs
 
   k_j = 25.0; // Coeff for jerk cost
-  k_t = 20.0; // Coeff for time cost
+  k_t = 1.0; // Coeff for time cost
   k_s = 50.0; // Coeff for lat movement cost
   k_d = 5.0; // Coeff for lon movement cost
 
@@ -68,9 +68,9 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
   double target_T = 1.5; // seconds
   double dT = 0.25;
   double min_T = target_T - 2.0 * dT;
-  double max_T = target_T + 7.0 * dT;
+  double max_T = target_T + 12.0 * dT;
 
-  double min_V = r.speed_limit - 6.0; // m/s -- NOTE: 50MPH -> 22.352
+  double min_V = r.speed_limit - 5.5; // m/s -- NOTE: 50MPH -> 22.352
   double max_V = r.speed_limit;
   double dV = (max_V - min_V) / 10.0;
 
@@ -143,8 +143,6 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
   double d_delta_2 = (df - target_d) * (df - target_d);
 
   // Jerk cost is summed up over the path for both trajectories
-  double V_t_lat = 0.0;
-  double V_t_lon = 0.0;
   double A_t_lat = 0.0;
   double A_t_lon = 0.0;
   double J_t_lat = 0.0;
@@ -162,7 +160,7 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
 
   // Penalize driving slower than the speed limit to try to encourage
   // our ego to change lanes
-  double C_speed_limit = 25.0 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
+  double C_speed_limit = 30.0 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Penalize choosing to keep lane and getting close to the car in front
   double C_follow_distance = 150000.0 / (follow_ds * follow_ds);
@@ -170,7 +168,7 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed
   //             (  JERK COST  )   (  TIME COST )   (      LAT COST     )
-  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_s * s_dot_delta_2) + V_t_lat + A_t_lat;
+  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_s * s_dot_delta_2);
 
   // Get the total Longitudinal Trajectory cost
   // d cost is chosen as (df - target_d)^2 because we ideally converge on
@@ -179,15 +177,15 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
   // be working on converging the whole time. We dont want to punish slow
   // convergence because it actually might be ideal and most comfortable!
   //             (  JERK COST  )   (  TIME COST )   (    LON COST   )
-  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2) + V_t_lon + A_t_lon;
+  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // outside of the algorithm cost values
-  double C_extra = V_t_lat + V_t_lon + (A_t_lat + A_t_lon) + C_speed_limit;
+  double C_extra = 2.0 * (A_t_lat + A_t_lon) + C_speed_limit;
 
-  #ifdef DEBUG_COST
+  #ifdef DEBUG
   cout << " [*] Cost Breakdown:" << endl
-       << "   - Sf_FINAL: " << sf_dot << endl
-       << "   - Time Frame: " << traj.T << endl
+       << "   - sf_dot: " << sf_dot << endl
+       << "   - time: " << traj.T << endl
        << "   - C_lat: " << k_lat * C_lat << endl
        << "     - J_lat: " << (k_j * J_t_lat) << endl
        << "   - C_lon: " << k_lon * C_lon << endl
