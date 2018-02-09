@@ -20,7 +20,9 @@ class LaneFollow: public Behavior {
                           const int &current_lane, const Road &r,
                           ObstacleTracker &o) const;
 
-    double cost(const Trajectory &traj, const double &target_s, const double &target_d, const double &target_s_dot, const double &speed_limit) const;
+    double cost(const Trajectory &traj, const double &target_s,
+                const double &target_d, const double &target_s_dot,
+                const double &follow_sf, const double &speed_limit) const;
 
     std::string name() const;
 

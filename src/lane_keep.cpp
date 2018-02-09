@@ -70,9 +70,9 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
   double min_T = target_T - 2.0 * dT;
   double max_T = target_T + 12.0 * dT;
 
-  double min_V = r.speed_limit - 5.5; // m/s -- NOTE: 50MPH -> 22.352
+  double min_V = r.speed_limit - 5.9; // m/s -- NOTE: 50MPH -> 22.352
   double max_V = r.speed_limit;
-  double dV = (max_V - min_V) / 10.0;
+  double dV = (max_V - min_V) / 9.0;
 
   #ifdef DEBUG
   cout << " [*] Trying " << ((max_V - min_V) / dV) * ((max_T - min_T) / dT) << " combinations" << endl;
@@ -163,7 +163,7 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
   double C_speed_limit = 30.0 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Penalize choosing to keep lane and getting close to the car in front
-  double C_follow_distance = 150000.0 / (follow_ds * follow_ds);
+  double C_follow_distance = 200000.0 / (follow_ds * follow_ds);
 
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed

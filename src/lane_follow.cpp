@@ -127,7 +127,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
     Trajectory traj = Trajectory(name(), s_path, d_path, T);
 
     // Get the cost of the trajectory, set it
-    double c = cost(traj, target_s, target_d, target_s_dot, speed_limit);
+    double c = cost(traj, target_s, target_d, target_s_dot, follow_s_final, speed_limit);
     traj.cost = c;
 
     #ifdef DEBUG
@@ -166,7 +166,9 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
 //   3) Penalize following from far away such that we would
 //      rather keep lane and get closer to traffic, maybe
 //      to change lanes
-double LaneFollow::cost(const Trajectory &traj, const double &target_s, const double &target_d, const double &target_s_dot, const double &speed_limit) const {
+double LaneFollow::cost(const Trajectory &traj, const double &target_s,
+                        const double &target_d, const double &target_s_dot,
+                        const double &follow_sf, const double &speed_limit) const {
 
   // Difference between target position and final position
   double sf = traj.s.get_position_at(traj.T);
@@ -197,6 +199,11 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s, const do
   // MIN: 0, MAX: 50*50 --> 2500
   double sf_dot = traj.s.get_velocity_at(traj.T);
   double C_speed_limit = (sf_dot - speed_limit) * (sf_dot - speed_limit);
+
+  // Penalize choosing to follow lane and get close to the car in front
+  // Should help encourage more lane changes
+  double follow_ds = (follow_sf - sf);
+  double C_follow_distance = 15000.0 / (follow_ds * follow_ds);
 
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed

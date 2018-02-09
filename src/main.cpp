@@ -102,7 +102,7 @@ int main()
   // Speed limit on this road is 50MPH
   Road r = Road({Lane(4), Lane(4), Lane(4)}, 49);
 
-  // Load our Virtual Driver
+  // Create our vehicle object
   Vehicle v = Vehicle();
   v.length = 2.0; // meters
   v.width = 4.0; // meters

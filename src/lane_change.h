@@ -20,12 +20,30 @@ class LaneChange: public Behavior {
                           const int &current_lane, const Road &r,
                           ObstacleTracker &o) const;
 
-    double cost(const Trajectory &traj, const double &target_s, const double &target_d, const double &speed_limit, const double &follow_sf) const;
-    double cost2(const Trajectory &traj, const double &target_speed, const double &target_d, const double &speed_limit) const;
-
     std::string name() const;
 
   private:
+
+    Trajectory __get_traj_merge(const double &si, const double &si_dot,
+                                const double &si_dot_dot, const double &di,
+                                const double &di_dot, const double &di_dot_dot,
+                                const double &target_s, const double &target_s_dot,
+                                const double &target_s_dot_dot, const double &target_d,
+                                const double &T, const double &speed_limit,
+                                const double &follow_sf) const;
+
+    Trajectory __get_traj_change(const double &si, const double si_dot,
+                                 const double &si_dot_dot, const double &di,
+                                 const double di_dot, const double &di_dot_dot,
+                                 const double &target_s_dot, const double &target_d,
+                                 const double &T, const double &speed_limit) const;
+
+    double cost(const Trajectory &traj, const double &target_s,
+                const double &target_d, const double &speed_limit,
+                const double &follow_sf) const;
+
+    double cost2(const Trajectory &traj, const double &target_speed,
+                 const double &target_d, const double &speed_limit) const;
 
     // Constants for time gap and distance buffer
     double distance_buffer; // D_0

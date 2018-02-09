@@ -25,12 +25,84 @@ LaneChange::LaneChange()
   k_d = 0.1; // Coeff for lon movement cost
 
   k_lon = 0.5; // weight of lon costs
-  k_lat = 0.2; // weight of lateral costs
+  k_lat = 0.3; // weight of lateral costs
 }
 
 LaneChange::~LaneChange(){/* Nothing to do here */}
 
 std::string LaneChange::name() const {return "Lane Changing";}
+
+// For outputing average, min and max costs
+#ifdef DEBUG_COST
+static double max_c = 0.0;
+static double min_c = 100000000.0;
+static double avg_c = 0.0;
+static int N = 0;
+#endif
+
+Trajectory LaneChange::__get_traj_merge(
+  const double &si, const double &si_dot,
+  const double &si_dot_dot, const double &di,
+  const double &di_dot, const double &di_dot_dot,
+  const double &target_s, const double &target_s_dot,
+  const double &target_s_dot_dot, const double &target_d,
+  const double &T, const double &speed_limit,
+  const double &follow_sf) const
+{
+  // Vary T and v to generate a bunch of possible s paths
+  JMT s_path = JMT({si, si_dot, si_dot_dot}, {target_s, target_s_dot, target_s_dot_dot}, T);
+
+  // Vary just T to generate a matching d path.
+  JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
+
+  // Turn our JMTs into a full blown trajectory
+  Trajectory traj = Trajectory(name(), s_path, d_path, T);
+
+  // Get the cost of the trajectory, set it
+  double c = cost(traj, target_s, target_d, speed_limit, follow_sf);
+  traj.cost = c;
+
+  #ifdef DEBUG_COST
+  if(c < min_c) min_c = c;
+  if(c > max_c) max_c = c;
+  N++;
+  avg_c = ((avg_c * (N - 1)) + c) / N;
+  #endif
+
+  // return this made trajectory
+  return traj;
+}
+
+Trajectory LaneChange::__get_traj_change(
+  const double &si, const double si_dot,
+  const double &si_dot_dot, const double &di,
+  const double di_dot, const double &di_dot_dot,
+  const double &target_s_dot, const double &target_d,
+  const double &T, const double &speed_limit) const
+{
+  // Vary T and v to generate a bunch of possible s paths
+  JMT s_path = JMT({si, si_dot, si_dot_dot}, target_s_dot, T);
+
+  // Vary just T to generate a matching d path.
+  JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
+
+  // Turn our JMTs into a full blown trajectory
+  Trajectory traj = Trajectory(name(), s_path, d_path, T);
+
+  // Get the cost of the trajectory, set it
+  double c = cost2(traj, speed_limit, target_d, speed_limit);
+  traj.cost = c;
+
+  #ifdef DEBUG_COST
+  if(c < min_c) min_c = c;
+  if(c > max_c) max_c = c;
+  N++;
+  avg_c = ((avg_c * (N - 1)) + c) / N;
+  #endif
+
+  // return this made trajectory
+  return traj;
+}
 
 // Determine possible trajectories for left and right lane changes
 // Given our current state (speed and lane), will check the adjacent
@@ -83,13 +155,6 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
        << endl;
   #endif
 
-  #ifdef DEBUG_COST
-  static double max_c = 0.0;
-  static double min_c = 100000000.0;
-  static double avg_c = 0.0;
-  static int N = 0;
-  #endif
-
   // vars for maintaining lane obstacle status
   int cur_id, prev_id;
   Obstacle cur;
@@ -121,6 +186,9 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
         cur_s = cur.s;
         cur_s_dot = cur.s_dot;
         cur_s_dot_dot = cur.s_dot_dot;
+
+        // no looking backwards to merge behind people behind us...
+        if(cur_s < si) continue;
 
         // Predict out to the fuuuuture
         cur_s = cur_s + cur_s_dot * T + 0.5 * cur_s_dot_dot * T * T;
@@ -167,34 +235,17 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
              << "   - target_s_dot_dot: " << target_s_dot_dot << endl;
         #endif
 
-        // no looking backwards
-        if(target_s < si) continue;
-
-        // Vary T and v to generate a bunch of possible s paths
-        JMT s_path = JMT({si, si_dot, si_dot_dot}, {target_s, target_s_dot, target_s_dot_dot}, T);
-
-        // Vary just T to generate a matching d path.
-        JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
-
-        // Turn our JMTs into a full blown trajectory
-        Trajectory traj = Trajectory(name(), s_path, d_path, T);
-
-        // Get the cost of the trajectory, set it
-        double c = cost(traj, target_s, target_d, speed_limit, cur_s);
-        traj.cost = c;
+        // Get our merging trajectory
+        Trajectory traj = __get_traj_merge(si, si_dot, si_dot_dot, di, di_dot,
+                                           di_dot_dot, target_s, target_s_dot,
+                                           target_s_dot_dot, target_d, T,
+                                           speed_limit, cur_s);
 
         // Add traj to our set of possible trajectories
         insert_traj_sorted(t_set, traj);
 
         // no looking very far forwards
         if(target_s >= si) break;
-
-        #ifdef DEBUG_COST
-        if(c < min_c) min_c = c;
-        if(c > max_c) max_c = c;
-        N++;
-        avg_c = ((avg_c * (N - 1)) + c) / N;
-        #endif
       }
 
       // Finally, see if we can pull in front of the leading car in the lane
@@ -209,19 +260,13 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
              << "   - target_s_dot: " << speed_limit << endl;
         #endif
 
-        JMT s_path = JMT({si, si_dot, si_dot_dot}, speed_limit, T);
-        JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
-        Trajectory traj = Trajectory(name(), s_path, d_path, T);
-        double c = cost2(traj, speed_limit, target_d, speed_limit);
-        traj.cost = c;
-        insert_traj_sorted(t_set, traj);
+        // Get our simple lane change trajectory
+        Trajectory traj = __get_traj_change(si, si_dot, si_dot_dot, di, di_dot,
+                                            di_dot_dot, target_s_dot, target_d,
+                                            T, speed_limit);
 
-        #ifdef DEBUG_COST
-        if(c < min_c) min_c = c;
-        if(c > max_c) max_c = c;
-        N++;
-        avg_c = ((avg_c * (N - 1)) + c) / N;
-        #endif
+        // Add traj to our set of possible trajectories
+        insert_traj_sorted(t_set, traj);
       }
     }
 
@@ -245,6 +290,9 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
         cur_s = cur.s;
         cur_s_dot = cur.s_dot;
         cur_s_dot_dot = cur.s_dot_dot;
+
+        // no looking backwards to merge behind people behind us...
+        if(cur_s < si) continue;
 
         // Predict out to the fuuuuture
         cur_s = cur_s + cur_s_dot * T + 0.5 * cur_s_dot_dot * T * T;
@@ -290,34 +338,17 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
              << "   - target_s_dot_dot: " << target_s_dot_dot << endl;
         #endif
 
-        // no looking backwards
-        if(target_s < si) continue;
-
-        // Vary T and v to generate a bunch of possible s paths
-        JMT s_path = JMT({si, si_dot, si_dot_dot}, {target_s, target_s_dot, target_s_dot_dot}, T);
-
-        // Vary just T to generate a matching d path.
-        JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
-
-        // Turn our JMTs into a full blown trajectory
-        Trajectory traj = Trajectory(name(), s_path, d_path, T);
-
-        // Get the cost of the trajectory, set it
-        double c = cost(traj, target_s, target_d, speed_limit, cur_s);
-        traj.cost = c;
+        // Get our merging trajectory
+        Trajectory traj = __get_traj_merge(si, si_dot, si_dot_dot, di, di_dot,
+                                           di_dot_dot, target_s, target_s_dot,
+                                           target_s_dot_dot, target_d, T,
+                                           speed_limit, cur_s);
 
         // Add traj to our set of possible trajectories
         insert_traj_sorted(t_set, traj);
 
         // no looking very far forwards
         if(target_s >= si) break;
-
-        #ifdef DEBUG_COST
-        if(c < min_c) min_c = c;
-        if(c > max_c) max_c = c;
-        N++;
-        avg_c = ((avg_c * (N - 1)) + c) / N;
-        #endif
       }
 
       // Finally, see if we can pull in front of the leading car in the lane
@@ -332,19 +363,13 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
              << "   - target_s_dot: " << speed_limit << endl;
         #endif
 
-        JMT s_path = JMT({si, si_dot, si_dot_dot}, speed_limit, T);
-        JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
-        Trajectory traj = Trajectory(name(), s_path, d_path, T);
-        double c = cost2(traj, speed_limit, target_d, speed_limit);
-        traj.cost = c;
-        insert_traj_sorted(t_set, traj);
+        // Get our simple lane change trajectory
+        Trajectory traj = __get_traj_change(si, si_dot, si_dot_dot, di, di_dot,
+                                            di_dot_dot, target_s_dot, target_d,
+                                            T, speed_limit);
 
-        #ifdef DEBUG_COST
-        if(c < min_c) min_c = c;
-        if(c > max_c) max_c = c;
-        N++;
-        avg_c = ((avg_c * (N - 1)) + c) / N;
-        #endif
+        // Add traj to our set of possible trajectories
+        insert_traj_sorted(t_set, traj);
       }
     }
   }
@@ -385,8 +410,8 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   for(double t = 0.0; t <= traj.T; t += dt)
   {
     // Penalize Acceleration over the trajectories
-    A_t_lat += 0.02 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
-    A_t_lon += 0.02 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
+    A_t_lat += 0.04 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
+    A_t_lon += 0.04 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
 
     // Penalize Jerk over the trajectories
     J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
@@ -401,7 +426,7 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   if(abs(sf_dot - si_dot) < 0.1)
     C_lane_speed_adv = 10000.0;
   else
-     C_lane_speed_adv = 75.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
+     C_lane_speed_adv = 65.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
 
   // Penalty for being far from the target speed
   double C_speed_limit = 1.5 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
@@ -478,8 +503,8 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   double J_t_lon = 0.0;
   for(double t = 0.0; t <= traj.T; t += dt)
   {
-    A_t_lat += 0.02 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
-    A_t_lon += 0.02 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
+    A_t_lat += 0.04 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
+    A_t_lon += 0.04 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
 
     J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
     J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);

@@ -415,7 +415,7 @@ bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
          obs_d >= (d - m_veh.width / 2.0) - BUFFER_D  &&
          obs_d <= (d + m_veh.width / 2.0) + BUFFER_D)
       {
-        #ifdef DEBUG
+        #ifdef DEBUG_LITE
         std::cout << "  - COLLISION!" << endl;
         #endif
 
