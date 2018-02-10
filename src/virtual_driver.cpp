@@ -318,7 +318,7 @@ void VirtualDriver::path_history_update(const Path &prev)
   }
 
   #ifdef DEBUG
-  cout << " [$] Last " << m_last_followed_window_size << "points followed window:\n";
+  cout << " [$] Last " << m_last_followed_window_size << " points followed window:\n";
   for(auto it = m_last_followed_points.begin(); it != m_last_followed_points.end(); ++it)
   {
     cout << "   - (" << (*it).x << ", " << (*it).y << ")\n";
@@ -448,10 +448,9 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   double last_x, last_y, last_v;
   int window_size = 10;
   int acc_ins = 0;
-  double dt = window_size * TIME_DELTA;
   vector<double> accels = vector<double>(window_size, 0.0);
   double avg_a = 0.0;
-  double MAX_ACC_MAG = 3.0;
+  double MAX_ACC_MAG = 8.0;
 
   // Use our last followed points to get acceleration guesses for
   // early points since we're using a rolling, windowed average
@@ -507,9 +506,12 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   }
 
   #ifdef DEBUG
-    cout << " [&] Filled window with " << acc_ins % window_size << " points"
-         << endl;
-    #endif
+  cout << " [&] Filled window with " << acc_ins % window_size << " points"
+       << endl;
+  std::cout << " [&] Accels Window:\n";
+  for(int k = 0; k < window_size; ++k)
+    cout << "    - " << accels[k] << endl;
+  #endif
 
   // Once we've potentially looked at the previous points and filled in
   // the acceleration window, we're now at the beginning of the path/our
@@ -517,6 +519,10 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   last_x = mVeh.x;
   last_y = mVeh.y;
   last_v = mVeh.speed;
+
+  #ifdef DEBUG
+    cout << " [&] Starting at (" << last_x << ", " << last_y << ") -- v = " << last_v << endl;
+    #endif
 
   // Because we have a reliable last_v, we can start at 0 (our current
   // position) to get another acceleation value to add to the window.
@@ -528,6 +534,10 @@ bool VirtualDriver::comfortable(Trajectory &traj)
     double dist = distance(p.x[i], p.y[i], last_x, last_y);
     double v =  dist / TIME_DELTA;
     double a = (v - last_v) / TIME_DELTA;
+
+    #ifdef DEBUG
+    cout << " [&] Evaluated (" << p.x[i] << ", " << p.y[i] << ") -- v = " << v << " -- a = " << a << endl;
+    #endif
 
     // Always check velocity each step
     if(v >= mRoad.speed_limit)
@@ -563,15 +573,17 @@ bool VirtualDriver::comfortable(Trajectory &traj)
     {
       avg_a = 0;
       for(int j = 0; j < window_size; ++j) avg_a += accels[j];
-      avg_a = avg_a / dt;
+      avg_a = avg_a / window_size;
 
-      if(abs(avg_a) >= MAX_ACC_MAG)
+      // On initial take off ONLY I get HUGE acceleration outliers
+      // so the second half of this is a patch for now :/
+      if(abs(avg_a) >= MAX_ACC_MAG && (m_prev_points_left != 0 && acc_ins < window_size))
       {
         #ifdef DEBUG
         std::cout << " [&] Accels Window:\n";
         for(int k = 0; k < window_size; ++k)
           cout << "    - " << accels[k] << std::endl;
-          cout << " [&] Accels Sum: " << avg_a * dt << std::endl;
+        cout << " [&] Accels Sum: " << avg_a * window_size << std::endl;
 
         std::cout << " [*] Rejected for acceleration:" << std::endl
                   << "   - i = " << i << std::endl
@@ -611,7 +623,9 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
   for(TrajectorySet::iterator it = possible_trajectories.begin(); it != possible_trajectories.end(); ++it)
   {
     #ifdef DEBUG
-    std::cout << " [+] Checking a '" << (*it).behavior << "' of cost " << (*it).cost << std::endl;
+    std::cout << " [+] Checking a '" << (*it).behavior << "' of cost " << (*it).cost
+              << " and T = " << (*it).T
+              << std::endl;
     #endif
 
     // Make sure the trajectory is safe (no collisions) and
