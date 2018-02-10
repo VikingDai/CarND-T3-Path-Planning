@@ -6,7 +6,7 @@
 #include "lane_follow.h"
 
 #include <iostream>
-#define DEBUG
+// #define DEBUG
 #define DEBUG_COST
 
 using namespace std;
@@ -68,7 +68,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   // Iterate on possible T values for this behavior
   double target_T = 1.5; // seconds
   double dT = 0.5;
-  double min_T = target_T - 1.0 * dT;
+  double min_T = target_T - 0.0 * dT;
   double max_T = target_T + 2.5 * dT;
 
   #ifdef DEBUG
@@ -198,7 +198,7 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
   // our ego to keep or change lanes
   // MIN: 0, MAX: 50*50 --> 2500
   double sf_dot = traj.s.get_velocity_at(traj.T);
-  double C_speed_limit = (sf_dot - speed_limit) * (sf_dot - speed_limit);
+  double C_speed_limit = 1.75 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Penalize choosing to follow lane and get close to the car in front
   // Should help encourage more lane changes

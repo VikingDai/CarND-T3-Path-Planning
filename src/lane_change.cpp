@@ -19,7 +19,7 @@ LaneChange::LaneChange()
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 2.0; // Coeff for jerk cost
+  k_j = 1.0; // Coeff for jerk cost
   k_t = 2.0; // Coeff for time cost
   k_s = 1.0; // Coeff for lat movement cost
   k_d = 0.1; // Coeff for lon movement cost
@@ -429,7 +429,7 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
      C_lane_speed_adv = 65.0 / ((sf_dot - si_dot) * (sf_dot - si_dot));
 
   // Penalty for being far from the target speed
-  double C_speed_limit = 1.5 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
+  double C_speed_limit = 2.25 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Penalty for merging into someone where the car you're following is
   // close - only for this guy since the other cost assumes theres no
@@ -523,7 +523,7 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   // Penalize driving slower than the speed limit to try to encourage
   // our ego to change lanes into the fastest lane possible
   // MIN: 0, MAX: 50*50 --> 2500
-  double C_speed_limit = 1.5 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
+  double C_speed_limit = 2.25 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
 
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed

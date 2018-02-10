@@ -369,7 +369,7 @@ Obstacle ObstacleTracker::get_vehicle(const int &id)
 
 bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
 {
-  double BUFFER_S = 4.0;
+  double BUFFER_S = 2.0;
   double BUFFER_D = 0.5;
 
   for(auto it = m_obstacles.begin(); it != m_obstacles.end(); ++it)

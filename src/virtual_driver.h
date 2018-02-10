@@ -100,15 +100,24 @@ class VirtualDriver {
     // Trajectory Pooling Layer                                              //
     //-----------------------------------------------------------------------//
 
-    // Define how much we plan
+    // Define how much we plan ahead in "steps"
     int m_planning_horizon;
 
-    // Define how far we went since the last planning round
+    // Define how far we went since the last planning round, used to determine
+    // an accurate start point
     int m_prev_points_left;
-    Path prev_path;
+
+    // Keep track of the last path we handed over so we can compare and grab
+    // points based on how many we're told we've consumed
+    Path m_last_path;
+
+    // Save a window of N points we've followed for use in comfort calculations
+    // and smoothing
+    int m_last_followed_window_size;
+    std::list<Point> m_last_followed_points;
 
     // Define what we were following after we last planned, used to define
-    // subsequent start states
+    // subsequent start states (using the derivative functions)
     JMT m_cur_s_coeffs;
     JMT m_cur_d_coeffs;
 

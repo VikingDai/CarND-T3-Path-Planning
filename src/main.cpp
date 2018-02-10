@@ -100,7 +100,7 @@ int main()
   // Load our Road, plus current (only...) settings
   // Each Lane is 4m wide, with 3 lanes in total
   // Speed limit on this road is 50MPH
-  Road r = Road({Lane(4), Lane(4), Lane(4)}, 49);
+  Road r = Road({Lane(4), Lane(4), Lane(4)}, 48);
 
   // Create our vehicle object
   Vehicle v = Vehicle();
