@@ -15,7 +15,7 @@ Circle::Circle()
 
 Circle::~Circle(){}
 
-Circle::Circle(const std::vector<double> &pt1, const std::vector<double> &pt2, const std::vector<double> &pt3)
+Circle::Circle(const std::vector<double> pt1, const std::vector<double> pt2, const std::vector<double> pt3)
 {
   // Initialize Radius to something non-sensical
   this->m_radius = -1.0;
@@ -30,7 +30,7 @@ Circle::Circle(const std::vector<double> &pt1, const std::vector<double> &pt2, c
 }
 
 // Check the given point are perpendicular to x or y axis
-bool Circle::is_perpendicular(const std::vector<double> &pt1, const std::vector<double> &pt2, const std::vector<double> &pt3)
+bool Circle::is_perpendicular(const std::vector<double> pt1, const std::vector<double> pt2, const std::vector<double> pt3)
 {
   double yDelta_a = pt2[1] - pt1[1];
   double xDelta_a = pt2[0] - pt1[0];
@@ -46,7 +46,7 @@ bool Circle::is_perpendicular(const std::vector<double> &pt1, const std::vector<
   return false;
 }
 
-void Circle::__calc_circle(const std::vector<double> &pt1, const std::vector<double> &pt2, const std::vector<double> &pt3)
+void Circle::__calc_circle(const std::vector<double> pt1, const std::vector<double> pt2, const std::vector<double> pt3)
 {
   double yDelta_a = pt2[1] - pt1[1];
   double xDelta_a = pt2[0] - pt1[0];

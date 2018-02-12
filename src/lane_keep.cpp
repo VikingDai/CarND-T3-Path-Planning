@@ -66,9 +66,9 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
   // TO-DO: Get a "target" T value sanely that would work in a world thats
   // not the simulator...
   double target_T = 1.5; // seconds
-  double dT = 1.0;
+  double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
-  double max_T = target_T + 4.0 * dT;
+  double max_T = target_T + 6.0 * dT;
 
   double min_V = r.speed_limit - 8.0; // m/s -- NOTE: 50MPH -> 22.352
   double max_V = r.speed_limit;

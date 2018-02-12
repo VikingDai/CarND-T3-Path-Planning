@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "spline.h"
+#include "circle.h"
 
 #include "vehicle.h"
 #include "map.h"
@@ -141,6 +142,9 @@ class VirtualDriver {
 
     // Experimental smoothing of path for simulator
     Path generate_smoothed_path(const Trajectory &traj);
+
+    // Experimental smoothing of path for simulator -- version 2
+    Path generate_smoothed_path_2(const Trajectory &traj);
 };
 
 #endif // VIRTUAL_DRIVER_H

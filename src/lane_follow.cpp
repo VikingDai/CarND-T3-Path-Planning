@@ -68,8 +68,8 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   // Iterate on possible T values for this behavior
   double target_T = 1.5; // seconds
   double dT = 0.5;
-  double min_T = target_T - 0.0 * dT;
-  double max_T = target_T + 2.5 * dT;
+  double min_T = target_T - 1.0 * dT;
+  double max_T = target_T + 5.0 * dT;
 
   #ifdef DEBUG
   cout << " [*] Trying " << ((max_T - min_T) / dT) << " combinations" << endl;

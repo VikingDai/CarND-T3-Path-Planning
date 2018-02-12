@@ -7,7 +7,7 @@ add_definitions(-std=c++11)
 set(CXX_FLAGS "-Wall")
 set(CMAKE_CXX_FLAGS, "${CXX_FLAGS}")
 
-set(sources src/obstacle_tracker.cpp src/lane_follow.cpp src/lane_change.cpp src/lane_keep.cpp src/jmt.cpp src/virtual_driver.cpp src/vehicle.cpp src/obstacle.cpp src/road.cpp src/map.cpp src/main.cpp)
+set(sources src/obstacle_tracker.cpp src/lane_follow.cpp src/lane_change.cpp src/lane_keep.cpp src/jmt.cpp src/circle.cpp src/virtual_driver.cpp src/vehicle.cpp src/obstacle.cpp src/road.cpp src/map.cpp src/main.cpp)
 
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")

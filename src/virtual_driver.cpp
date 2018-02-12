@@ -235,10 +235,10 @@ VirtualDriver::VirtualDriver(const Vehicle initial_status, const Road &r,
   m_tracker = ObstacleTracker(55, 5);
 
   // Behaviors this Driver can plan for
-  m_vehicle_behaviors = std::vector<Behavior *>(3, NULL);
+  m_vehicle_behaviors = std::vector<Behavior *>(2, NULL);
   m_vehicle_behaviors[0] = new LaneKeep();
   m_vehicle_behaviors[1] = new LaneFollow();
-  m_vehicle_behaviors[2] = new LaneChange();
+  // m_vehicle_behaviors[2] = new LaneChange();
 
   // Initial Ego car state
   mVeh = initial_status;
@@ -444,13 +444,12 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   // Get the path from the trajectory that we would be following
   Path p = generate_path(traj);
 
-  // For averaging/gating the acceleration
-  double last_x, last_y, last_v;
+  // For averaging velocity over a window/gating the acceleration
+  double last_x2 = 0.0, last_y2 = 0.0, last_x = 0.0, last_y = 0.0, last_v_avg = 0.0, v_avg = 0.0;
   int window_size = 10;
-  int acc_ins = 0;
-  vector<double> accels = vector<double>(window_size, 0.0);
-  double avg_a = 0.0;
-  double MAX_ACC_MAG = 8.0;
+  vector<double> vels = vector<double>(window_size, 0.0);
+  int v_count = 0;
+  double MAX_ACC_MAG = 10.0;
 
   // Use our last followed points to get acceleration guesses for
   // early points since we're using a rolling, windowed average
@@ -469,60 +468,102 @@ bool VirtualDriver::comfortable(Trajectory &traj)
     // our "last" position is the front of the list/0th point
     last_x = (*it).x;
     last_y = (*it).y;
-    last_v = 0.0;
     ++it;
 
     #ifdef DEBUG
-    cout << " [&] Grabbed first point"
+    cout << " [&] Visiting old, past points:" << endl;
+    cout << "   - (" << last_x << ", " << last_y << ") -- v = ? -- a = ?"
          << endl;
     #endif
 
     // NOTE: I'm using i below to see how many velocities we've seen
-    // but the loop terminationo condition is based on the above
+    // but the loop termination condition is based on the above
     // iterator
     for(int i = 1; it != m_last_followed_points.end(); ++it, ++i)
     {
       double dist = distance((*it).x, (*it).y, last_x, last_y);
       double v =  dist / TIME_DELTA;
 
-      // If we haven't seen 2 velocities then we cant have a real value
-      // for acceleration, so only calc acceleration when i >= 2
-      if(i >= 2)
+      #ifdef DEBUG
+      cout << "   - (" << (*it).x << ", " << (*it).y << ") -- v = " << v;
+      #endif
+
+      // Add to our set of velocities for calculating the average
+      // velocity and acceleration
+      vels[v_count % window_size] = v;
+      ++v_count;
+
+      // If we have enough velocities seen, get the average velocity
+      // over the window we're watching
+      if(v_count >= window_size)
       {
-        // Insert our acceleration in our window
-        accels[acc_ins % window_size] = ((v - last_v) / TIME_DELTA);
-        acc_ins++;
+        last_v_avg = v_avg;
+        v_avg = 0.0;
+        for(int j = 0; j < window_size; ++j) v_avg += vels[j];
+        v_avg = v_avg / window_size;
+
+        #ifdef DEBUG
+        cout << " -- v_avg = " << v_avg;
+        #endif
       }
 
+      #ifdef DEBUG
+      else cout << " -- v_avg = ?";
+      #endif
+
+
+      // If we haven't seen 2 average velocities then we cant have a real value
+      // for acceleration, so only calc acceleration when i >= 2
+      if(v_count > window_size)
+      {
+        // Get the acceleration in the direction of the vehicle
+        double accT = (v_avg - last_v_avg) / TIME_DELTA;
+
+        // Get an estimate of the radius of curvature for the acceleration
+        // created due to turning
+        // roc = ((1 + (y'(x))^2)^1.5) / | y''(x) |
+        // y'(x) --> velocity at x
+        // y'(x) --> acceleration at x
+        double r_o_c = pow((1 + (v_avg * v_avg)), 1.5) / abs(accT);
+        double accN = (v_avg * v_avg) / r_o_c;
+
+        #ifdef DEBUG
+        double a = sqrt(accN*accN + accT*accT);
+        cout << " -- accT = " << accT << "-- accN = " << accN << " -- a = " << a << endl;
+        #endif
+      }
+
+      #ifdef DEBUG
+      else cout << " accT = ? -- accN = ? -- a = ?" << endl;
+      #endif
+
       // Update our last know values
+      last_x2 = last_x;
+      last_y2 = last_y;
       last_x = (*it).x;
       last_y = (*it).y;
-      last_v = v;
     }
-
-    // Finally, consider the acceleration at our start point
-    accels[acc_ins % window_size] = ((mVeh.speed - last_v) / TIME_DELTA);
-    acc_ins++;
+  }
+  else
+  {
+    // Once we've potentially looked at the previous points and filled in
+    // the acceleration window, we're now at the beginning of the path/our
+    // current status
+    last_x2 = last_x;
+    last_y2 = last_y;
+    last_x = mVeh.x;
+    last_y = mVeh.y;
   }
 
   #ifdef DEBUG
-  cout << " [&] Filled window with " << acc_ins % window_size << " points"
-       << endl;
-  std::cout << " [&] Accels Window:\n";
-  for(int k = 0; k < window_size; ++k)
-    cout << "    - " << accels[k] << endl;
+  cout << " [&] Velocities Seen: " << v_count << endl;
+  cout << " [&] Last Avg V: " << last_v_avg << endl;
+  cout << " [&] Avg V: " << v_avg << endl;
   #endif
 
-  // Once we've potentially looked at the previous points and filled in
-  // the acceleration window, we're now at the beginning of the path/our
-  // current status
-  last_x = mVeh.x;
-  last_y = mVeh.y;
-  last_v = mVeh.speed;
-
   #ifdef DEBUG
-    cout << " [&] Starting at (" << last_x << ", " << last_y << ") -- v = " << last_v << endl;
-    #endif
+  cout << " [&] Starting at (" << last_x << ", " << last_y << ")" << endl;
+  #endif
 
   // Because we have a reliable last_v, we can start at 0 (our current
   // position) to get another acceleation value to add to the window.
@@ -530,13 +571,12 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   // 0th point because we're already here and that would be silly.
   for(int i = 1; i < p.size(); ++i)
   {
-    // Get the instantanious velocity and acceleations
+    // Get the instantanious velocity and accelerations
     double dist = distance(p.x[i], p.y[i], last_x, last_y);
     double v =  dist / TIME_DELTA;
-    double a = (v - last_v) / TIME_DELTA;
 
     #ifdef DEBUG
-    cout << " [&] Evaluated (" << p.x[i] << ", " << p.y[i] << ") -- v = " << v << " -- a = " << a << endl;
+    cout << " [&] Evaluated (" << p.x[i] << ", " << p.y[i] << ") -- v = " << v << endl;
     #endif
 
     // Always check velocity each step
@@ -550,9 +590,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
                 << "   - x = " << p.x[i] << std::endl
                 << "   - y = " << p.y[i] << std::endl
                 << "   - dist = " << dist << std::endl
-                << "   - last_v = " << last_v << std::endl
                 << "   - v = " << v << std::endl
-                << "   - a = " << a << std::endl
                 << "   - type: " << traj.behavior << std::endl
                 << "   - s: " << traj.s << std::endl
                 << "   - d: " << traj.d << std::endl
@@ -562,29 +600,63 @@ bool VirtualDriver::comfortable(Trajectory &traj)
       return false;
     }
 
-    // Add the acceleration value to our set of values to avg with
-    accels[acc_ins % window_size] = a;
-    acc_ins++;
+    // Add to our set of velocities for calculating the average
+    // velocity and acceleration
+    vels[v_count % window_size] = v;
+    ++v_count;
 
-    // If it hasn't been N frames, just keep going, not enough
-    // data points yet, otherwise, get that average acceleration
-    // and compare to our threshold value
-    if(acc_ins >= window_size)
+    // If we have enough velocities seen, get the average velocity
+    // over the window we're watching
+    if(v_count >= window_size)
     {
-      avg_a = 0;
-      for(int j = 0; j < window_size; ++j) avg_a += accels[j];
-      avg_a = avg_a / window_size;
+      last_v_avg = v_avg;
+      v_avg = 0.0;
+      for(int j = 0; j < window_size; ++j) v_avg += vels[j];
+      v_avg = v_avg / window_size;
+    }
 
-      // On initial take off ONLY I get HUGE acceleration outliers
-      // so the second half of this is a patch for now :/
-      if(abs(avg_a) >= MAX_ACC_MAG && (m_prev_points_left != 0 && acc_ins < window_size))
+    // If we've seen more than one averaged velocity then we can
+    // get a acceleration
+    if(v_count > window_size)
+    {
+      // Get the acceleration in the direction of the vehicle
+      double accT = (v_avg - last_v_avg) / (TIME_DELTA * window_size);
+
+      // Get the acceleration due to turning
+      double accN = 0.0;
+
+      // Get an estimate of the radius of curvature for the acceleration
+      // created due to turning
+      // OLD METHOD:
+      // roc = ((1 + (y'(x))^2)^1.5) / | y''(x) |
+      // y'(x) --> velocity at x
+      // y'(x) --> acceleration at x
+      // double r_o_c = pow((1 + (v_avg * v_avg)), 1.5) / abs(accT);
+      // NEW METHOD: Fit a circle and take the radius
+      Circle c = Circle({last_x2, last_y2}, {last_x, last_y}, {p.x[i], p.y[i]});
+      double r_o_c = c.radius();
+
+      #ifdef DEBUG
+      cout << " [&] ROC: " << r_o_c << endl;
+      #endif
+
+      accN = (v_avg * v_avg) / r_o_c;
+
+      // Total acceleration
+      double a = sqrt(accN*accN + accT*accT);
+
+      #ifdef DEBUG
+      cout << " [&] Avg V: " << v_avg << endl;
+      cout << " [&] Last Avg V: " << last_v_avg << endl;
+      cout << " [&] AccT: " << accT << endl;
+      cout << " [&] AccN: " << accN << endl;
+      cout << " [&] AccTotal: " << a << endl;
+      #endif
+
+      // See if we violate the max acceleration
+      if(abs(a) >= MAX_ACC_MAG)
       {
         #ifdef DEBUG
-        std::cout << " [&] Accels Window:\n";
-        for(int k = 0; k < window_size; ++k)
-          cout << "    - " << accels[k] << std::endl;
-        cout << " [&] Accels Sum: " << avg_a * window_size << std::endl;
-
         std::cout << " [*] Rejected for acceleration:" << std::endl
                   << "   - i = " << i << std::endl
                   << "   - last_x = " << last_x << std::endl
@@ -592,10 +664,12 @@ bool VirtualDriver::comfortable(Trajectory &traj)
                   << "   - x = " << p.x[i] << std::endl
                   << "   - y = " << p.y[i] << std::endl
                   << "   - dist = " << dist << std::endl
-                  << "   - last_v = " << last_v << std::endl
                   << "   - v = " << v << std::endl
-                  << "   - a = " << a << std::endl
-                  << "   - avg_a = " << avg_a << std::endl
+                  << "   - v_avg = " << v_avg << std::endl
+                  << "   - last_v_avg = " << last_v_avg << std::endl
+                  << "   - accT = " << accT << std::endl
+                  << "   - accN = " << accN << std::endl
+                  << "   - acc_total = " << a << std::endl
                   << "   - type: " << traj.behavior << std::endl
                   << "   - s: " << traj.s << std::endl
                   << "   - d: " << traj.d << std::endl
@@ -605,8 +679,11 @@ bool VirtualDriver::comfortable(Trajectory &traj)
         return false;
       }
     }
-    last_x = p.x[i]; last_y = p.y[i]; last_v = v;
+
+    // Update our last used points
+    last_x = p.x[i]; last_y = p.y[i];
   }
+
   return true;
 }
 
@@ -819,6 +896,60 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
   return p;
 }
 
+// Convert a Trajectory into a smoothed, actual followable path for the simulator
+Path VirtualDriver::generate_smoothed_path_2(const Trajectory &traj)
+{
+  // Get the normal path - sets of x and y points
+  Path p = generate_path(traj);
+
+  // Set of coresponding time values -- We're going to parameterize the X and Y
+  // equations and smooth with splines
+  std::vector<double> time_set;
+
+  // For perspective shift of points
+  double yaw_rad = deg2rad(mVeh.yaw);
+
+  // Define our smoother splines and smoothing parameters
+  std::vector<double> xpts, ypts;
+  int smooth_interval = 5;               // Rate to add points to the spline
+  int smooth_window = 0;                  // Window (+/-) the point to add
+  int smooth_window_step = smooth_window; // Increment size to step through
+                                          // the window
+  // Add points to our spline smoothers
+  for(int i = 0; i < p.size(); ++i)
+  {
+    if(i % smooth_interval == 0)
+    {
+      for(int j = i - smooth_window; j <= i + smooth_window; j += smooth_interval)
+      {
+        // Handle points that wouldn't be in the path already generated
+        if(j < 0 || j >= p.size()) continue;
+
+        // Add points in window to splines
+        xpts.push_back(p.x[i]);
+        ypts.push_back(p.y[i]);
+        time_set.push_back((double) j * TIME_DELTA);
+      }
+    }
+  }
+
+  // Create spline smoothers from data sets made above
+  tk::spline x_t, y_t;
+  x_t.set_points(time_set, xpts);
+  y_t.set_points(time_set, ypts);
+
+  // Extract smoothed points for our path
+  for(int i = 0; i < p.size(); ++i)
+  {
+    double t = ((double) i * TIME_DELTA);
+    p.x[i] = x_t(t);
+    p.y[i] = y_t(t);
+  }
+
+  // Return final path object
+  return p;
+}
+
 /******************************************************************************
 * Path Planner Pipeline                                                       *
 ******************************************************************************/
@@ -839,6 +970,7 @@ Path VirtualDriver::plan_route()
 {
   // Debug state printing
   #ifdef DEBUG
+  cout << " [+] Our speed: " << mVeh.speed << endl;
   cout << m_tracker.get_debug_lanes();
   #endif
 
@@ -852,6 +984,8 @@ Path VirtualDriver::plan_route()
      << " [+] vehicle (x, y) / (s, d): (" << mVeh.x << ", "
      << mVeh.y << ") / (" << mVeh.s << ", " << mVeh.d << ")\n"
      << " [+] vehicle lane: " << mRoad.get_vehicle_lane(mVeh) << "\n"
+     << " [+] vehicle yaw: " << mVeh.yaw << " degrees | "
+     << deg2rad(mVeh.yaw) << " rad/s\n"
      << " [+] vehicle speed: " << mVeh.speed << " m/s | "
      << MPS_TO_MPH(mVeh.speed) << " mph" << "\n";
   #endif
@@ -864,7 +998,7 @@ Path VirtualDriver::plan_route()
   std::vector<Trajectory> possible_trajectories = generate_trajectories();
 
   #ifdef CLI_OUTPUT
-  ss << " [*] Looking at top 75:\n";
+  ss << " [*] Looking at top 75 (of " << possible_trajectories.size() << "):\n";
   for(int i = 0; i < 75 && i < possible_trajectories.size(); ++i)
   {
     ss << "   - " << possible_trajectories[i].behavior << " - "

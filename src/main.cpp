@@ -55,6 +55,10 @@ void getSimulatorUpdates(const long &ts, const json &j, Vehicle &v, vector<Obsta
   double end_path_s = j[1]["end_path_s"];
   double end_path_d = j[1]["end_path_d"];
 
+  cout << " [?] End (s, d) - (" << end_path_s << ", " << end_path_d << ")" << endl;
+  cout << " [?] Car (s, d) - (" << car_s << ", " << car_d << ")" << endl;
+  cout << " [?] Car (x, y) - (" << car_x << ", " << car_y << ")" << endl;
+
   // Sensor Fusion Data, a list of all other cars on the same side of the road.
   vector<vector<double>> sensor_fusion = j[1]["sensor_fusion"];
   vector<Obstacle> obs;
