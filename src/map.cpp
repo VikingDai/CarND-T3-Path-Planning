@@ -6,7 +6,18 @@
 using namespace std;
 
 // Interpolate spare map waypoints so we can have a better getXY function output (:
-// Adapted from  -- https://github.com/Hayoung-Kim/udacity-path-planning/blob/master/src/main.cpp
+// Uses a window of 4 waypoints and fits them to a spline to interpolate in
+// between:
+//                    s_0            s_1            s_2
+// P(-1)           *   .              .              .
+//                     .              .              .
+// P( 0)         * ----+ Interpolates .              .
+//                     | this window  .              .
+// P( 2)     * --------+--------------+ Interpolates .
+//                                    | this window  .
+// P( 3)  * --------------------------+--------------+
+//
+// P( 4) *
 static void interpolate_map_waypoints(std::vector<double> &maps_s, std::vector<double> &maps_x, std::vector<double> &maps_y, const double &max_s)
 {
   // Final map objects and vars
@@ -36,11 +47,6 @@ static void interpolate_map_waypoints(std::vector<double> &maps_s, std::vector<d
     double s   = maps_s[i];
     double s_a = maps_s[a] + (a < i ? max_s : 0);
     double s_aa = maps_s[aa] + (aa < i ? max_s : 0);
-
-    // cout << "\tBefore  (" << x_b << ", " << y_b << ") -> s = " << s_b << endl
-    //      << "\tCurrent (" << x << ", " << y << ") -> s = " << s << endl
-    //      << "\tAfter   (" << x_a << ", " << y_a << ") -> s = " << s_a << endl
-    //      << "\tFar     (" << x_aa << ", " << y_aa << ") -> s = " << s_aa << endl;
 
     tk::spline x_given_s;
     tk::spline y_given_s;
@@ -121,4 +127,4 @@ void Map::load_from_points(const std::vector<double> &waypoints_x,
   this->waypoints_dy = waypoints_dy;
 }
 
-Map::~Map(){/* Doesn't do shiiiit */}
+Map::~Map(){/* Doesn't do anything */}

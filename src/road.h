@@ -27,6 +27,7 @@ class Road {
     // Get lane of vehicle
     int get_vehicle_lane(const Vehicle &v) const;
     int get_vehicle_lane(const Obstacle &v) const;
+    int get_lane(const double &d_val) const;
 
     // Speed Limit
     double speed_limit;

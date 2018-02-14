@@ -4,7 +4,7 @@
 using namespace std;
 
 // #define DEBUG
-#define DEBUG_LITE
+// #define DEBUG_LITE
 
 // Receive Sensor Fusion Updates
 // These come in with an ID for the object and an (x,y), (s,d) and (vx, vy)
@@ -49,28 +49,28 @@ double TrackedObstacle::d_dot() const {return history.front().d_dot;}
 double TrackedObstacle::s_dot_dot() const {return history.front().s_dot_dot;}
 double TrackedObstacle::d_dot_dot() const {return history.front().d_dot_dot;}
 
-// Getters for averaged status values
-double TrackedObstacle::avg_s() const {return s_avg;}
-double TrackedObstacle::avg_d() const {return d_avg;}
-double TrackedObstacle::avg_s_dot() const {return s_dot_avg;}
-double TrackedObstacle::avg_d_dot() const {return d_dot_avg;}
-double TrackedObstacle::avg_s_dot_dot() const {return s_dot_dot_avg;}
-double TrackedObstacle::avg_d_dot_dot() const {return d_dot_dot_avg;}
-
 // Update Interface
 void TrackedObstacle::update(Obstacle &obs)
 {
   // Don't want to mismatch data
   if(obs.id != id) return;
 
-  // If we have older data, calculate instantaneous v and a for frenet frame
+  // If we have older data, calculate instantaneous v for frenet frame
   if(history.size() != 0)
   {
+    // Calculate time delta
     double dt = (((double)(obs.t - history.front().t)) / 1000.0);
+
+    // velocities
     obs.s_dot = (obs.s - history.front().s) / dt;
     obs.d_dot = (obs.d - history.front().d) / dt;
-    //obs.s_dot_dot = (obs.s_dot - history.front().s_dot) / dt;
-    //obs.d_dot_dot = (obs.d_dot - history.front().d_dot) / dt;
+
+    // acceleration
+    // if(history.size() > 1)
+    //{
+    //  obs.s_dot_dot = (obs.s_dot - history.front().s_dot) / dt;
+    //  obs.d_dot_dot = (obs.d_dot - history.front().d_dot) / dt;
+    //}
 
     #ifdef DEBUG
     cout << " [+] Updating Object " << id << endl
@@ -88,39 +88,6 @@ void TrackedObstacle::update(Obstacle &obs)
 
   // Add the obstacle status onto the history chain
   history.push_front(obs);
-
-  // Adjust running averages
-  double N = history.size();
-  if(history.size() >= history_buffer_size)
-  {
-    s_avg = ((s_avg * N) - history.back().s + obs.s) / N;
-    d_avg = ((d_avg * N) - history.back().d + obs.s) / N;
-    s_dot_avg = ((s_dot_avg * N) - history.back().s_dot + obs.s_dot) / N;
-    d_dot_avg = ((d_dot_avg * N) - history.back().d_dot + obs.d_dot) / N;
-    s_dot_dot_avg = ((s_dot_dot_avg * N) - history.back().s_dot_dot + obs.s_dot_dot) / N;
-    d_dot_dot_avg = ((d_dot_dot_avg * N) - history.back().d_dot_dot + obs.d_dot_dot) / N;
-    history.pop_back();
-  }
-  else
-  {
-    s_avg = ((s_avg * N) + obs.s) / N;
-    d_avg = ((d_avg * N) + obs.d) / N;
-    s_dot_avg = ((s_dot_avg * N) + obs.s_dot) / N;
-    d_dot_avg = ((d_dot_avg * N) + obs.d_dot) / N;
-    s_dot_dot_avg = ((s_dot_dot_avg * N) + obs.s_dot_dot) / N;
-    d_dot_dot_avg = ((d_dot_dot_avg * N) + obs.d_dot_dot) / N;
-  }
-
-  #ifdef DEBUG
-  cout << " [+] Updating Object " << id << " averages" << endl
-       << "   - avg_s: " << s_avg << endl
-       << "   - avg_d: " << d_avg << endl
-       << "   - avg_s_dot: " << s_dot_avg << endl
-       << "   - avg_d_dot: " << d_dot_avg << endl
-       << "   - avg_s_dot_dot: " << s_dot_dot_avg << endl
-       << "   - avg_d_dot_dot: " << d_dot_dot_avg << endl;
-  #endif
-
 }
 
 /*****************************************************************************\
@@ -129,32 +96,24 @@ void TrackedObstacle::update(Obstacle &obs)
 
 double TrackedObstacle::s_at(double t) const
 {
-  //if(-1.0 * t > history.size()) return history.back().s;
-  // if(t < 0) ...
   if(t == 0) return history.front().s;
   return s() + (s_dot() * t) + (0.5 * s_dot_dot() * t * t);
 }
 
 double TrackedObstacle::d_at(double t) const
 {
-  // if(-1.0 * t > history.size()) return history.back().d;
-  // if(t < 0) ...
   if(t == 0) return history.front().d;
   return d() + (d_dot() * t) + (0.5 * d_dot_dot() * t * t);
 }
 
 double TrackedObstacle::s_dot_at(double t) const
 {
-  //if(-1.0 * t > history.size()) return history.back().s;
-  // if(t < 0) ...
   if(t == 0) return history.front().s;
   return s_dot() + s_dot_dot() * t;
 }
 
 double TrackedObstacle::d_dot_at(double t) const
 {
-  // if(-1.0 * t > history.size()) return history.back().d;
-  // if(t < 0) ...
   if(t == 0) return history.front().d;
   return d_dot() + d_dot_dot() * t;
 }
@@ -256,13 +215,13 @@ void ObstacleTracker::update(const long &ts, std::vector<Obstacle> &obs, const V
     }
     else {
       #ifdef DEBUG_LITE
-      std::cout << " [+] Object ID = " << (*it).second.current().id << " - ("
-                << "s = " << (*it).second.current().s
-                << ", d = " << (*it).second.current().d
-                << ", s_dot = " << (*it).second.current().s_dot
-                << ", d_dot = " << (*it).second.current().d_dot
-                << ", s_dot_dot = " << (*it).second.current().s_dot_dot
-                << ", d_dot_dot = " << (*it).second.current().d_dot_dot
+      std::cout << " [+] Object ID = " << (*it).second.id << " - ("
+                << "s = " << (*it).second.s()
+                << ", d = " << (*it).second.d()
+                << ", s_dot = " << (*it).second.s_dot()
+                << ", d_dot = " << (*it).second.d_dot()
+                << ", s_dot_dot = " << (*it).second.s_dot_dot()
+                << ", d_dot_dot = " << (*it).second.d_dot_dot()
                 << ")" << std::endl;
       #endif
 
@@ -328,8 +287,21 @@ std::string ObstacleTracker::get_debug_lanes()
     }
   }
 
-  // Build return value
+  // Build return value into this
   stringstream s;
+
+  // Obstacle status out
+  s << " [*] Obstacle Status:\n";
+  for(auto it = m_obstacles.cbegin(); it != m_obstacles.cend(); ++it)
+  {
+    s << "   - ID: " << (*it).second.id
+      << " -- s = " << (*it).second.s()
+      << " -- d = " << (*it).second.d()
+      << " -- s_dot = " << (*it).second.s_dot()
+      << " -- d_dot = " << (*it).second.d_dot() << "\n";
+  }
+
+  // Lanes status out
   s << " [*] Lane Status:\n";
   for(int i = 0; i < lane_strs.size(); ++i)
   {
@@ -378,19 +350,33 @@ bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
     TrackedObstacle obs_t = (*it).second;
 
     #ifdef DEBUG
-    std::cout << " [+] Checking Trajectory against Obstacle " << obs_t.id << endl;
+    std::cout << " [+] Checking Trajectory against Obstacle " << obs_t.id
+              << ", s = " << obs_t.s()
+              << ", d = " << obs_t.d()
+              << ", s_dot = " << obs_t.s_dot()
+              << ", d_dot = " << obs_t.d_dot()
+              << endl;
     #endif
+
+    // Ignore the guy keeping their lane behind us for now
+    // TO-DO: Handle this case better
+    if(m_road.get_lane(obs_t.d()) == m_road.get_lane(traj.d.at(0)) && obs_t.s() <= traj.s.at(0))
+    {
+      #ifdef DEBUG
+      std::cout << " [+] Its this guys job to follow us... " << endl;
+      #endif
+      continue;
+    }
 
     // Iterate on the time steps to see if the trajectory is safe
     double dT = 0.1;
     for(double T = 0.0; T <= traj.T; T += dT)
     {
-      // Get trajectory position at T
+      // Get ego vehicle's trajectory position at T
       double s = traj.s.at(T);
       double d = traj.d.at(T);
 
-      // Dont leave our side of the road...
-      // TO-DO: Un-hardcode 12
+      // Dont leave our side of the road... that aint safe mkay
       if(d < 0.1 || d > m_road.width - 0.1)
       {
         #ifdef DEBUG
@@ -400,16 +386,22 @@ bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
       }
 
       // Get the obstacles position at T
+      // ASSUME: constant velocity, and no lane changes
       double obs_s = obs_t.s_at(T);
-      double obs_d = obs_t.d_at(T);
+      double obs_d = obs_t.d();
 
       #ifdef DEBUG
-      std::cout << "  - T = " << T << ": "
-                << "(" << s << ", " << d << ") | "
+      std::cout << "  - T = " << T << ": us - "
+                << "(" << s << ", " << d << ") | obs - "
                 << "(" << obs_s << ", " << obs_d << ")" << endl;
       #endif
 
-      // do they collide?
+      // Do they collide?
+      // NOTE: I've seen some weird things were the car behind
+      // us going fast might suggest it woudl rear end us. I'm
+      // going to throw out this idea though because thats not
+      // reaaaally our fault if we're already at the speed lim
+      // for example.
       if(obs_s >= (s - m_veh.length / 2.0) - BUFFER_S &&
          obs_s <= (s + m_veh.length / 2.0) + BUFFER_S &&
          obs_d >= (d - m_veh.width / 2.0) - BUFFER_D  &&

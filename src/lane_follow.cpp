@@ -18,13 +18,13 @@ LaneFollow::LaneFollow(){
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 2.0; // Coeff for jerk cost
-  k_t = 20.0; // Coeff for time cost
+  k_j = 25.0; // Coeff for jerk cost
+  k_t = 1.0; // Coeff for time cost
   k_s = 50.0; // Coeff for lat movement cost
   k_d = 5.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
-  k_lat = 0.3; // weight of lat costs
+  k_lat = 0.1; // weight of lat costs
 }
 
 LaneFollow::~LaneFollow(){/* Nothing to do here*/}
@@ -53,7 +53,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   // It would probably help us get better trajectories
   double follow_s = following.s;
   double follow_s_dot = (following.s_dot == 0 ? following.speed : following.s_dot);
-  double follow_a = following.s_dot_dot;
+  double follow_a = 0.0; // following.s_dot_dot;
 
   #ifdef DEBUG
   cout << " [-] Should be following 'Obstacle ID " << follow_id << "' at s = "
@@ -66,10 +66,10 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   double target_d = r.get_lane_mid_frenet(current_lane);
 
   // Iterate on possible T values for this behavior
-  double target_T = 1.5; // seconds
+  double target_T = max(abs(si_dot - follow_s_dot) / 7.0, 1.5); // seconds
   double dT = 0.5;
-  double min_T = target_T - 1.0 * dT;
-  double max_T = target_T + 5.0 * dT;
+  double min_T = target_T - 0.0 * dT;
+  double max_T = target_T + 4.0 * dT;
 
   #ifdef DEBUG
   cout << " [*] Trying " << ((max_T - min_T) / dT) << " combinations" << endl;
@@ -96,20 +96,20 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   {
     // Predict where the following car will be in T seconds
     double follow_s_final = follow_s + follow_s_dot * T + 0.5 * follow_a * T * T;
-    double follow_v_final = follow_s_dot + follow_a * T;
+    double follow_s_dot_final = follow_s_dot + follow_a * T;
 
     // check speed input - limit to speed limit
-    double target_s_dot = follow_v_final;
-    double target_s_dot_dot = follow_a;
+    double target_s_dot = follow_s_dot_final;
+    double target_s_dot_dot = 0.0;
     if(target_s_dot > speed_limit) target_s_dot = speed_limit;
 
     // Determine our car's target s position based onthe car we're following
-    double target_s = follow_s_final - (distance_buffer + time_gap * follow_v_final);
+    double target_s = follow_s_final - (distance_buffer + time_gap * follow_s_dot_final);
 
     #ifdef DEBUG
     cout << " [-] Trying T = " << T << ":" << endl
          << "   - Follow s final: " << follow_s_final << endl
-         << "   - Follow s_dot final: " << follow_v_final << endl
+         << "   - Follow s_dot final: " << follow_s_dot_final << endl
          << "   - target_s: " << target_s << endl
          << "   - target_d: " << target_d << endl
          << "   - target_s_dot: " << target_s_dot << endl
@@ -220,7 +220,7 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
   double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
-  double C_extra = (A_t_lat + A_t_lon) + C_speed_limit;
+  double C_extra = 0.0; //(A_t_lat + A_t_lon) + C_speed_limit;
 
   #ifdef DEBUG_COST
   cout << " [*] Cost Breakdown:" << endl

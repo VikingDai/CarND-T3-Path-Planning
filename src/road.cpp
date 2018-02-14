@@ -63,3 +63,14 @@ int Road::get_vehicle_lane(const Obstacle &v) const
   }
   return -1; // Error case -> TO-DO: Throw an error?
 }
+
+int Road::get_lane(const double &d_val) const
+{
+  double j = 0;
+  for(int i = 0; i < lane_count; ++i)
+  {
+    j += lanes[i].width;
+    if(d_val <= j) return i;
+  }
+  return -1; // Error case -> TO-DO: Throw an error?
+}

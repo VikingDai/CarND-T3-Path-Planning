@@ -48,14 +48,6 @@ class TrackedObstacle {
     double s_dot_dot() const;
     double d_dot_dot() const;
 
-    // Getters for averaged status values
-    double avg_s() const;
-    double avg_d() const;
-    double avg_s_dot() const;
-    double avg_d_dot() const;
-    double avg_s_dot_dot() const;
-    double avg_d_dot_dot() const;
-
     // Update Interface
     void update(Obstacle &obs);
 
@@ -72,18 +64,6 @@ class TrackedObstacle {
     int id;
 
   private:
-
-    // Average position of the obstacle
-    double s_avg;
-    double d_avg;
-
-    // Velocity in Frenet
-    double s_dot_avg;
-    double d_dot_avg;
-
-    // Acceleration in Frenet
-    double s_dot_dot_avg;
-    double d_dot_dot_avg;
 
     // Tracked Obstacle History
     // I'm tracking these obstacles by ID over time. The list allows O(1)

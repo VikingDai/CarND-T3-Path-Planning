@@ -9,7 +9,10 @@
 #include "trajectory.h"
 #include "road.h"
 #include "obstacle_tracker.h"
+
 #include <vector>
+#include <cmath>
+#include <string>
 
 class Behavior
 {

@@ -235,10 +235,10 @@ VirtualDriver::VirtualDriver(const Vehicle initial_status, const Road &r,
   m_tracker = ObstacleTracker(55, 5);
 
   // Behaviors this Driver can plan for
-  m_vehicle_behaviors = std::vector<Behavior *>(2, NULL);
+  m_vehicle_behaviors = std::vector<Behavior *>(3, NULL);
   m_vehicle_behaviors[0] = new LaneKeep();
   m_vehicle_behaviors[1] = new LaneFollow();
-  // m_vehicle_behaviors[2] = new LaneChange();
+  m_vehicle_behaviors[2] = new LaneChange();
 
   // Initial Ego car state
   mVeh = initial_status;
@@ -449,7 +449,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
   int window_size = 10;
   vector<double> vels = vector<double>(window_size, 0.0);
   int v_count = 0;
-  double MAX_ACC_MAG = 10.0;
+  double MAX_ACC_MAG = 9.9;
 
   // Use our last followed points to get acceleration guesses for
   // early points since we're using a rolling, windowed average
@@ -465,7 +465,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
          << endl;
     #endif
 
-    // our "last" position is the front of the list/0th point
+    // our "last" position is the front of the list/oldest point
     last_x = (*it).x;
     last_y = (*it).y;
     ++it;
@@ -476,7 +476,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
          << endl;
     #endif
 
-    // NOTE: I'm using i below to see how many velocities we've seen
+    // NOTE: I'm using 'i' below to see how many velocities we've seen
     // but the loop termination condition is based on the above
     // iterator
     for(int i = 1; it != m_last_followed_points.end(); ++it, ++i)
@@ -512,6 +512,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
       #endif
 
 
+      #ifdef DEBUG
       // If we haven't seen 2 average velocities then we cant have a real value
       // for acceleration, so only calc acceleration when i >= 2
       if(v_count > window_size)
@@ -524,16 +525,13 @@ bool VirtualDriver::comfortable(Trajectory &traj)
         // roc = ((1 + (y'(x))^2)^1.5) / | y''(x) |
         // y'(x) --> velocity at x
         // y'(x) --> acceleration at x
-        double r_o_c = pow((1 + (v_avg * v_avg)), 1.5) / abs(accT);
+        // double r_o_c = pow((1 + (v_avg * v_Avg)), 1.5) / abs(accT);
+        Circle c = Circle({last_x2, last_y2}, {last_x, last_y}, {p.x[i], p.y[i]});
+        double r_o_c = c.radius();
         double accN = (v_avg * v_avg) / r_o_c;
-
-        #ifdef DEBUG
         double a = sqrt(accN*accN + accT*accT);
         cout << " -- accT = " << accT << "-- accN = " << accN << " -- a = " << a << endl;
-        #endif
       }
-
-      #ifdef DEBUG
       else cout << " accT = ? -- accN = ? -- a = ?" << endl;
       #endif
 
@@ -654,7 +652,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
       #endif
 
       // See if we violate the max acceleration
-      if(abs(a) >= MAX_ACC_MAG)
+      if(abs(accT) >= MAX_ACC_MAG)
       {
         #ifdef DEBUG
         std::cout << " [*] Rejected for acceleration:" << std::endl
@@ -707,6 +705,7 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
 
     // Make sure the trajectory is safe (no collisions) and
     // comfy (speed, accel and jerk are under requirements)
+    //if(comfortable(*it)) return *it;
     if(m_tracker.trajectory_is_safe(*it) && comfortable(*it)) return *it;
 
     #ifdef DEBUG
@@ -997,17 +996,6 @@ Path VirtualDriver::plan_route()
   // behavior/feasiblity checker to weigh and pick from
   std::vector<Trajectory> possible_trajectories = generate_trajectories();
 
-  #ifdef CLI_OUTPUT
-  ss << " [*] Looking at top 75 (of " << possible_trajectories.size() << "):\n";
-  for(int i = 0; i < 75 && i < possible_trajectories.size(); ++i)
-  {
-    ss << "   - " << possible_trajectories[i].behavior << " - "
-       << possible_trajectories[i].cost;
-    if((i + 1) % 3 == 0) ss << "\n";
-  }
-  ss << "\n";
-  #endif
-
   // BEHAVIOR PLANNING:
   // ------------------
   // Given our set of possible trajectories, go through it to find the
@@ -1018,6 +1006,25 @@ Path VirtualDriver::plan_route()
 
   // Extract the best one
   Trajectory opt = optimal_trajectory(possible_trajectories);
+
+  #ifdef CLI_OUTPUT
+  bool found = false;
+  ss << " [*] Looking at top 75 (of " << possible_trajectories.size() << "):\n";
+  ss << "\033[0;31m";
+  for(int i = 0; i < 75 && i < possible_trajectories.size(); ++i)
+  {
+    if(trajs_are_same(possible_trajectories[i], opt))
+    {
+      ss << "\033[0;32m";
+      found = true;
+    }
+    ss << "   - " << possible_trajectories[i].behavior << " - "
+       << possible_trajectories[i].cost;
+    if(found) ss << "\033[0m";
+    if((i + 1) % 3 == 0) ss << "\n";
+  }
+  ss << "\n";
+  #endif
 
   #ifdef CLI_OUTPUT
   ss << m_tracker.get_debug_lanes();

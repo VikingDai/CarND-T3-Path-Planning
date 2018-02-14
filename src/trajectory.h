@@ -22,6 +22,11 @@ class Trajectory {
 
 typedef std::vector<Trajectory> TrajectorySet;
 
+inline bool trajs_are_same(const Trajectory &t1, const Trajectory &t2)
+{
+  return (t1.cost == t2.cost && t1.behavior == t2.behavior);
+}
+
 inline void insert_traj_sorted(TrajectorySet &t_set, const Trajectory &traj)
 {
   // Iterate on the set and insert it in a sorted order

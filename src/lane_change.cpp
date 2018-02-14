@@ -15,17 +15,17 @@ using namespace std;
 LaneChange::LaneChange()
 {
   distance_buffer = 0.0; // meters, fixed distance of safety past a time gap
-  time_gap = 0.5;        // seconds,
+  time_gap = 1.0;        // seconds,
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 1.0; // Coeff for jerk cost
-  k_t = 2.0; // Coeff for time cost
-  k_s = 1.0; // Coeff for lat movement cost
-  k_d = 0.1; // Coeff for lon movement cost
+  k_j = 25.0; // Coeff for jerk cost
+  k_t = 1.0; // Coeff for time cost
+  k_s = 50.0; // Coeff for lat movement cost
+  k_d = 5.0; // Coeff for lon movement cost
 
-  k_lon = 0.5; // weight of lon costs
-  k_lat = 0.3; // weight of lateral costs
+  k_lon = 1.0; // weight of lon costs
+  k_lat = 0.1; // weight of lateral costs
 }
 
 LaneChange::~LaneChange(){/* Nothing to do here */}
@@ -56,7 +56,8 @@ Trajectory LaneChange::__get_traj_merge(
   JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
 
   // Turn our JMTs into a full blown trajectory
-  Trajectory traj = Trajectory(name(), s_path, d_path, T);
+  std::string n = name() + (target_d < di ? " Left" : " Right");
+  Trajectory traj = Trajectory(n, s_path, d_path, T);
 
   // Get the cost of the trajectory, set it
   double c = cost(traj, target_s, target_d, speed_limit, follow_sf);
@@ -87,7 +88,8 @@ Trajectory LaneChange::__get_traj_change(
   JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
 
   // Turn our JMTs into a full blown trajectory
-  Trajectory traj = Trajectory(name(), s_path, d_path, T);
+  std::string n = name() + (target_d < di ? " Left" : " Right");
+  Trajectory traj = Trajectory(n, s_path, d_path, T);
 
   // Get the cost of the trajectory, set it
   double c = cost2(traj, speed_limit, target_d, speed_limit);
@@ -113,7 +115,6 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
                                   const int &current_lane, const Road &r,
                                   ObstacleTracker &o) const
 {
-
   #ifdef DEBUG
   cout << " [-] Determing trajectories for '" << name() << "'" << endl;
   #endif
@@ -129,13 +130,13 @@ void LaneChange::add_trajectories(TrajectorySet &t_set,
 
   // Don't even look into changing a lane if we're not that close
   // TO-DO: This is a band-aid, heal this pls
-  if((following.s - si) > 40) return;
+  // if((following.s - si) > 40) return;
 
   // Define constraint ranges
-  double target_T = 1.5; // seconds
+  double target_T = max(abs(si_dot - speed_limit) / 8.0, 1.5); // seconds
   double dT = 0.5;
   double min_T = target_T - 1.0 * dT;
-  double max_T = target_T + 9.0 * dT;
+  double max_T = target_T + 7.0 * dT;
 
   int left = current_lane - 1;
   int right = current_lane + 1;
@@ -451,7 +452,7 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
-  double C_extra = (A_t_lat + A_t_lon) + C_speed_limit + C_lane_speed_adv + C_follow_dist;
+  double C_extra = 0.0; //(A_t_lat + A_t_lon) + C_speed_limit + C_lane_speed_adv + C_follow_dist;
 
   #ifdef DEBUG_COST
   cout << " [*] Cost Breakdown:" << endl
@@ -540,7 +541,7 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
-  double C_extra = (A_t_lat + A_t_lon) + C_speed_limit + C_lane_speed_adv;
+  double C_extra = 0.0; //(A_t_lat + A_t_lon) + C_speed_limit + C_lane_speed_adv;
 
   #ifdef DEBUG_COST
   cout << " [*] Cost 2 Breakdown:" << endl

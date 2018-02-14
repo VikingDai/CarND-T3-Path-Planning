@@ -20,17 +20,13 @@ LaneKeep::LaneKeep(){
   k_d = 5.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
-  k_lat = 0.3; // weight of lat costs
+  k_lat = 0.1; // weight of lat costs
 }
+
 LaneKeep::~LaneKeep(){/* Nothing to do here*/}
 
 std::string LaneKeep::name() const {return "Lane Keeping";}
 
-// Start state: [si, si_d, si_dd] at t0 (t0 = 0)
-// End state:   [sf_d, sf_dd] at t1 = t0 + T
-// st_d = target velocity.
-// Task: generate optimal longitudinal trajectory set of quintic polynomials by
-// varying the end constraints by ∆s_d[i] and T[j] according to: [ s1_d, s1+dd, T][ij] = [[st_d + ∆s_d[i]], 0, T[j] ]
 void LaneKeep::add_trajectories(TrajectorySet &t_set,
                                 double si, double si_dot, double si_dot_dot,
                                 double di, double di_dot, double di_dot_dot,
@@ -54,8 +50,6 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
   if(target_speed > speed_limit) target_speed = speed_limit;
 
   // Define constraint ranges
-  // NOTE: Right now I'm setting the "target" time at whatever the horizon
-  // is for the simulator (TIME_DELTA * m_planning_horizon)
   // NOTE: Its important to think about whats reasonable here. For example,
   // the max comfortable acceleration is 10 m/s^2, which means a target T
   // should _probably_ be based on how long we think the desired speed change
@@ -63,20 +57,22 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
   // have to make sure that that time is represented or we'll probably
   // accelerate super slow. That time window slides up as our speed difference
   // does too.
-  // TO-DO: Get a "target" T value sanely that would work in a world thats
-  // not the simulator...
-  double target_T = 1.5; // seconds
+  // NOTE: As such, I'm using naive kinematics to try to pick a target time
+  // all while being careful to not have a target time that too low. A short
+  // JMT could have weird things happen past the time line
+  double target_T = max(abs(speed_limit - si_dot) / 7.0, 1.5);
   double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
   double max_T = target_T + 6.0 * dT;
 
-  double min_V = r.speed_limit - 8.0; // m/s -- NOTE: 50MPH -> 22.352
+  double min_V = r.speed_limit - 10.0; // m/s -- NOTE: 50MPH -> 22.352
   double max_V = r.speed_limit;
   double dV = (max_V - min_V) / 10.0;
 
-  #ifdef DEBUG
+  #ifdef DEBUG_COST
   cout << " [*] Trying " << ((max_V - min_V) / dV) * ((max_T - min_T) / dT) << " combinations" << endl;
   cout << " [-] Varying given:" << endl
+       << "   - (T should be: abs(" << speed_limit << " - " << si_dot << ") / 8.0 = " << abs(speed_limit - si_dot) / 8.0 << endl
        << "   - T = " << min_T << " and T = " << max_T << endl
        << "   - v = " << min_V << " and v = " << max_V <<  ", dV = " << dV << endl
        << "   - target_speed: " << target_speed << endl
@@ -180,7 +176,7 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
   double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // outside of the algorithm cost values
-  double C_extra = 2.2 * (A_t_lat + A_t_lon) + C_speed_limit;
+  double C_extra = 0.0; //2.2 * (A_t_lat + A_t_lon) + C_speed_limit;
 
   #ifdef DEBUG
   cout << " [*] Cost Breakdown:" << endl
@@ -192,8 +188,6 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
        << "     - J_lon: " << (k_j * J_t_lon) << endl
        << "   - C_time: " << (k_t * traj.T) << endl
        << "   - C_extra: " << C_extra << endl
-       << "     - V_Lat: " << V_t_lat << endl
-       << "     - V_Lon: " << V_t_lon << endl
        << "     - A_Lat: " << A_t_lat << endl
        << "     - A_Lon: " << A_t_lon << endl
        << "     - A_comb: " << (A_t_lat + A_t_lon) << endl
