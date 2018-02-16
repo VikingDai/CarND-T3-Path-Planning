@@ -6,7 +6,7 @@
 #include "lane_follow.h"
 
 #include <iostream>
-// #define DEBUG
+#define DEBUG
 #define DEBUG_COST
 
 using namespace std;
@@ -18,10 +18,10 @@ LaneFollow::LaneFollow(){
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 25.0; // Coeff for jerk cost
+  k_j = 1.0; // Coeff for jerk cost
   k_t = 1.0; // Coeff for time cost
-  k_s = 50.0; // Coeff for lat movement cost
-  k_d = 5.0; // Coeff for lon movement cost
+  k_s = 5.0; // Coeff for lat movement cost
+  k_d = 1.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
   k_lat = 0.1; // weight of lat costs
@@ -35,7 +35,8 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
                                   double si, double si_dot, double si_dot_dot,
                                   double di, double di_dot, double di_dot_dot,
                                   const int &current_lane, const Road &r,
-                                  ObstacleTracker &o) const {
+                                  ObstacleTracker &o) const
+{
 
   #ifdef DEBUG
   cout << " [-] Determing trajectories for '" << name() << "'" << endl;
@@ -186,12 +187,12 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
   for(double t = 0.0; t <= traj.T; t += dt)
   {
     // Penalize Acceleration over the trajectories
-    A_t_lat += 0.01 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
-    A_t_lon += 0.01 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
+    A_t_lon += traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
+    A_t_lat += traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
 
     // Penalize Jerk over the trajectories
-    J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
-    J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
+    J_t_lon += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
+    J_t_lat += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
 
   // Penalize driving slower than the speed limit to try to encourage
@@ -208,7 +209,7 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed
   //             (  JERK COST  )   (  TIME COST )   (      LAT COST     )
-  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_s * s_delta_2);
+  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_s * s_delta_2);
 
   // Get the total Longitudinal Trajectory cost
   // d cost is chosen as (df - target_d)^2 because we ideally converge on
@@ -217,7 +218,7 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
   // be working on converging the whole time. We dont want to punish slow
   // convergence because it actually might be ideal and most comfortable!
   //             (  JERK COST  )   (  TIME COST )   (    LON COST   )
-  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
+  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
   double C_extra = 0.0; //(A_t_lat + A_t_lon) + C_speed_limit;
@@ -225,11 +226,15 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
   #ifdef DEBUG_COST
   cout << " [*] Cost Breakdown:" << endl
        << "   - Sf_FINAL: " << sf_dot << endl
+       << "   - target s: " << target_s << endl
+       << "   - s_final: " << sf << endl
+       << "   - s_delta: " << s_delta_2 << endl
+       << "   - s_delta_scaled: " << k_s * s_delta_2 << endl
        << "   - Time Frame: " << traj.T << endl
-       << "   - C_lat: " << k_lat * C_lat << endl
-       << "     - J_lat: " << (k_j * J_t_lat) << endl
        << "   - C_lon: " << k_lon * C_lon << endl
        << "     - J_lon: " << (k_j * J_t_lon) << endl
+       << "   - C_lat: " << k_lat * C_lat << endl
+       << "     - J_lat: " << (k_j * J_t_lat) << endl
        << "   - C_time: " << (k_t * traj.T) << endl
        << "   - C_extra: " << C_extra << endl
        << "     - A_Lat: " << A_t_lat << endl

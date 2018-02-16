@@ -7,8 +7,8 @@
 
 #include <iostream>
 
-#define DEBUG
-#define DEBUG_COST
+// #define DEBUG
+// #define DEBUG_COST
 
 using namespace std;
 
@@ -19,10 +19,10 @@ LaneChange::LaneChange()
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 25.0; // Coeff for jerk cost
+  k_j = 1.0; // Coeff for jerk cost
   k_t = 1.0; // Coeff for time cost
-  k_s = 50.0; // Coeff for lat movement cost
-  k_d = 5.0; // Coeff for lon movement cost
+  k_s = 5.0; // Coeff for lat movement cost
+  k_d = 1.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
   k_lat = 0.1; // weight of lateral costs
@@ -60,7 +60,7 @@ Trajectory LaneChange::__get_traj_merge(
   Trajectory traj = Trajectory(n, s_path, d_path, T);
 
   // Get the cost of the trajectory, set it
-  double c = cost(traj, target_s, target_d, speed_limit, follow_sf);
+  double c = cost(traj, speed_limit, target_d, speed_limit, follow_sf);
   traj.cost = c;
 
   #ifdef DEBUG_COST
@@ -411,12 +411,12 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   for(double t = 0.0; t <= traj.T; t += dt)
   {
     // Penalize Acceleration over the trajectories
-    A_t_lat += 0.04 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
-    A_t_lon += 0.04 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
+    A_t_lon += traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
+    A_t_lat += traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
 
     // Penalize Jerk over the trajectories
-    J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
-    J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
+    J_t_lon += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
+    J_t_lat += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
 
   // penalty for changing lanes when theres not much of an
@@ -440,7 +440,7 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed
   //             (  JERK COST  )   (  TIME COST )   (      LAT COST     )
-  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_s * s_delta_2);
+  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_s * s_delta_2);
 
   // Get the total Longitudinal Trajectory cost
   // d cost is chosen as (df - target_d)^2 because we ideally converge on
@@ -449,7 +449,7 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   // be working on converging the whole time. We dont want to punish slow
   // convergence because it actually might be ideal and most comfortable!
   //             (  JERK COST  )   (  TIME COST )   (    LON COST   )
-  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
+  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
   double C_extra = 0.0; //(A_t_lat + A_t_lon) + C_speed_limit + C_lane_speed_adv + C_follow_dist;
@@ -458,10 +458,10 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
   cout << " [*] Cost Breakdown:" << endl
        << "   - sf_dot: " << sf_dot << endl
        << "   - time: " << traj.T << endl
-       << "   - C_lat: " << k_lat * C_lat << endl
-       << "     - J_lat: " << (k_j * J_t_lat) << endl
        << "   - C_lon: " << k_lon * C_lon << endl
        << "     - J_lon: " << (k_j * J_t_lon) << endl
+       << "   - C_lat: " << k_lat * C_lat << endl
+       << "     - J_lat: " << (k_j * J_t_lat) << endl
        << "   - C_time: " << (k_t * traj.T) << endl
        << "   - C_extra: " << C_extra << endl
        << "     - A_Lat: " << A_t_lat << endl
@@ -504,11 +504,11 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   double J_t_lon = 0.0;
   for(double t = 0.0; t <= traj.T; t += dt)
   {
-    A_t_lat += 0.04 * traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
-    A_t_lon += 0.04 * traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
+    A_t_lon += traj.s.get_acceleration_at(t) * traj.s.get_acceleration_at(t);
+    A_t_lat += traj.d.get_acceleration_at(t) * traj.d.get_acceleration_at(t);
 
-    J_t_lat += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
-    J_t_lon += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
+    J_t_lon += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
+    J_t_lat += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
 
   // Massive penalty for changing lanes when theres not much of an
@@ -529,7 +529,7 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   // Get the total Lateral Trajectory cost
   // s cost is penalizing the magnitude of the distance from target speed
   //             (  JERK COST  )   (  TIME COST )   (      LAT COST     )
-  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_s * s_dot_delta_2);
+  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_s * s_dot_delta_2);
 
   // Get the total Longitudinal Trajectory cost
   // d cost is chosen as (df - target_d)^2 because we ideally converge on
@@ -538,7 +538,7 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   // be working on converging the whole time. We dont want to punish slow
   // convergence because it actually might be ideal and most comfortable!
   //             (  JERK COST  )   (  TIME COST )   (    LON COST   )
-  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_d * d_delta_2);
+  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_d * d_delta_2);
 
   // Extra costs outside of the algorithm
   double C_extra = 0.0; //(A_t_lat + A_t_lon) + C_speed_limit + C_lane_speed_adv;
@@ -547,10 +547,10 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
   cout << " [*] Cost 2 Breakdown:" << endl
        << "   - sf_dot: " << sf_dot << endl
        << "   - time: " << traj.T << endl
-       << "   - C_lat: " << k_lat * C_lat << endl
-       << "     - J_lat: " << (k_j * J_t_lat) << endl
        << "   - C_lon: " << k_lon * C_lon << endl
        << "     - J_lon: " << (k_j * J_t_lon) << endl
+       << "   - C_lat: " << k_lat * C_lat << endl
+       << "     - J_lat: " << (k_j * J_t_lat) << endl
        << "   - C_time: " << (k_t * traj.T) << endl
        << "   - C_extra: " << C_extra << endl
        << "     - A_Lat: " << A_t_lat << endl

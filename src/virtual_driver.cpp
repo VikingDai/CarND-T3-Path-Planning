@@ -387,6 +387,12 @@ TrajectorySet VirtualDriver::generate_trajectories()
     di_dot_dot = 0;
   }
 
+  // I've seen weird cases where I might collide with a car and get a negative
+  // velocity. The simulator doesn't seem to handle this very well at all. I'm
+  // gonna cap the speed to positive for now, cant be worse than whats already
+  // going on.
+  if(si_dot < 0) si_dot = 0;
+
   #ifdef DEBUG
   std::cout << " [*] Starting Parameters:" << std::endl
             << "   - si:    " << si << std::endl
@@ -1009,9 +1015,9 @@ Path VirtualDriver::plan_route()
 
   #ifdef CLI_OUTPUT
   bool found = false;
-  ss << " [*] Looking at top 75 (of " << possible_trajectories.size() << "):\n";
+  ss << " [*] Looking at top 102 (of " << possible_trajectories.size() << "):\n";
   ss << "\033[0;31m";
-  for(int i = 0; i < 75 && i < possible_trajectories.size(); ++i)
+  for(int i = 0; i < 102 && i < possible_trajectories.size(); ++i)
   {
     if(trajs_are_same(possible_trajectories[i], opt))
     {
@@ -1023,6 +1029,7 @@ Path VirtualDriver::plan_route()
     if(found) ss << "\033[0m";
     if((i + 1) % 3 == 0) ss << "\n";
   }
+  if(!found) ss << "\033[0m";
   ss << "\n";
   #endif
 
