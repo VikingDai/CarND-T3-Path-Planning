@@ -14,9 +14,9 @@ using namespace std;
 LaneKeep::LaneKeep(){
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 1.0; // Coeff for jerk cost
+  k_j = 2.0; // Coeff for jerk cost
   k_t = 1.0; // Coeff for time cost
-  k_s = 5.0; // Coeff for lat movement cost
+  k_s = 20.0; // Coeff for lat movement cost
   k_d = 1.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
@@ -154,6 +154,11 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_speed, const 
     J_t_lon += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
     J_t_lat += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
+
+  // Try using AVERAGE jerk to get rid of the issues that come with using
+  // longer time frames
+  J_t_lon /= (traj.T / dt);
+  J_t_lat /= (traj.T / dt);
 
   // Penalize driving slower than the speed limit to try to encourage
   // our ego to change lanes

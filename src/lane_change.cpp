@@ -14,14 +14,14 @@ using namespace std;
 
 LaneChange::LaneChange()
 {
-  distance_buffer = 0.0; // meters, fixed distance of safety past a time gap
+  distance_buffer = 5.0; // meters, fixed distance of safety past a time gap
   time_gap = 1.0;        // seconds,
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 1.0; // Coeff for jerk cost
+  k_j = 2.0; // Coeff for jerk cost
   k_t = 1.0; // Coeff for time cost
-  k_s = 5.0; // Coeff for lat movement cost
+  k_s = 20.0; // Coeff for lat movement cost
   k_d = 1.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
@@ -419,6 +419,11 @@ double LaneChange::cost(const Trajectory &traj, const double &target_s, const do
     J_t_lat += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
 
+  // Try using AVERAGE jerk to get rid of the issues that come with using
+  // longer time frames
+  J_t_lon /= (traj.T / dt);
+  J_t_lat /= (traj.T / dt);
+
   // penalty for changing lanes when theres not much of an
   // advantage
   double si_dot = traj.s.get_velocity_at(0); // speed we WERE going
@@ -510,6 +515,11 @@ double LaneChange::cost2(const Trajectory &traj, const double &target_speed, con
     J_t_lon += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
     J_t_lat += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
+
+  // Try using AVERAGE jerk to get rid of the issues that come with using
+  // longer time frames
+  J_t_lon /= (traj.T / dt);
+  J_t_lat /= (traj.T / dt);
 
   // Massive penalty for changing lanes when theres not much of an
   // advantage - this penalty SHOULD make us want to follow more and

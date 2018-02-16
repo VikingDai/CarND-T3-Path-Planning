@@ -13,14 +13,14 @@ using namespace std;
 
 LaneFollow::LaneFollow(){
 
-  distance_buffer = 0.0; // meters, fixed distance of safety past a time gap
+  distance_buffer = 5.0; // meters, fixed distance of safety past a time gap
   time_gap = 1.0;        // seconds,
 
   dt = 0.05;  // time delta for summing integral costs
 
-  k_j = 1.0; // Coeff for jerk cost
+  k_j = 2.0; // Coeff for jerk cost
   k_t = 1.0; // Coeff for time cost
-  k_s = 5.0; // Coeff for lat movement cost
+  k_s = 20.0; // Coeff for lat movement cost
   k_d = 1.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
@@ -70,7 +70,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   double target_T = max(abs(si_dot - follow_s_dot) / 7.0, 1.5); // seconds
   double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
-  double max_T = target_T + 4.0 * dT;
+  double max_T = target_T + 8.0 * dT;
 
   #ifdef DEBUG
   cout << " [*] Trying " << ((max_T - min_T) / dT) << " combinations" << endl;
@@ -194,6 +194,11 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
     J_t_lon += traj.s.get_jerk_at(t) * traj.s.get_jerk_at(t);
     J_t_lat += traj.d.get_jerk_at(t) * traj.d.get_jerk_at(t);
   }
+
+  // Try using AVERAGE jerk to get rid of the issues that come with using
+  // longer time frames
+  J_t_lon /= (traj.T / dt);
+  J_t_lat /= (traj.T / dt);
 
   // Penalize driving slower than the speed limit to try to encourage
   // our ego to keep or change lanes

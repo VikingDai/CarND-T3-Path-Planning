@@ -235,10 +235,10 @@ VirtualDriver::VirtualDriver(const Vehicle initial_status, const Road &r,
   m_tracker = ObstacleTracker(55, 5);
 
   // Behaviors this Driver can plan for
-  m_vehicle_behaviors = std::vector<Behavior *>(3, NULL);
+  m_vehicle_behaviors = std::vector<Behavior *>(2, NULL);
   m_vehicle_behaviors[0] = new LaneKeep();
   m_vehicle_behaviors[1] = new LaneFollow();
-  m_vehicle_behaviors[2] = new LaneChange();
+  // m_vehicle_behaviors[2] = new LaneChange();
 
   // Initial Ego car state
   mVeh = initial_status;
@@ -386,6 +386,9 @@ TrajectorySet VirtualDriver::generate_trajectories()
     di_dot = 0;
     di_dot_dot = 0;
   }
+
+  // Watch out for start states that wrap around the map tile we've got
+  if(si >= mMap.max_s) si -= mMap.max_s;
 
   // I've seen weird cases where I might collide with a car and get a negative
   // velocity. The simulator doesn't seem to handle this very well at all. I'm
