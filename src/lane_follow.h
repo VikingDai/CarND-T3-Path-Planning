@@ -14,11 +14,12 @@ class LaneFollow: public Behavior {
   public:
     LaneFollow();
     ~LaneFollow();
-    void add_trajectories(TrajectorySet &t_set,
+
+    int add_trajectories(TrajectorySet &t_set,
                           double si, double si_dot, double si_dot_dot,
                           double di, double di_dot, double di_dot_dot,
-                          const int &current_lane, const Road &r,
-                          ObstacleTracker &o) const;
+                          const int &current_lane, const int &reference_lane,
+                          const Road &r, ObstacleTracker &o) const;
 
     double cost(const Trajectory &traj, const double &target_s,
                 const double &target_d, const double &target_s_dot,

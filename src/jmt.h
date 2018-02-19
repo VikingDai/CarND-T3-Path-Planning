@@ -33,7 +33,7 @@ class JMT {
     double get_acceleration_at(const double t) const;
     double get_jerk_at(const double t) const;
 
-    // Pretty Print
+    // Pretty Print for debug
     friend std::ostream& operator<<(std::ostream &os, const JMT &val);
 };
 

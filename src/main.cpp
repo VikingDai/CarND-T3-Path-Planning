@@ -13,10 +13,22 @@
 #include "obstacle.h"
 #include "path.h"
 
+// TO-DO Have a Debug header that can encapsulate the debug modes and
+// pretty print options
+// #define DEBUG
+
+// Our initial speed limit. In theory, localization would help update this
+// as we move around our world
+#define SPEED_LIMIT 43.0
+
+// Constants representing our vehicle. In the real world each car would
+// have its own config space that a class would probably look at to set
+// itself up
+#define VEH_LENGTH 4.47
+#define VEH_WIDTH  2.43
+
 using namespace std;
 using namespace std::chrono;
-
-// #define DEBUG
 
 // for convenience
 using json = nlohmann::json;
@@ -46,6 +58,7 @@ void getSimulatorUpdates(const long &ts, const json &j, Vehicle &v, vector<Obsta
   double car_speed = j[1]["speed"];
 
   // Previous Trajectory data given to the Planner
+  // This is WHATS LEFT of the path given
   vector<double> prev_x = j[1]["previous_path_x"];
   vector<double> prev_y = j[1]["previous_path_y"];
   prev.x = prev_x;
@@ -77,7 +90,7 @@ void getSimulatorUpdates(const long &ts, const json &j, Vehicle &v, vector<Obsta
   }
 
   // Update those references, woo!
-  v = Vehicle(6.0, 4.0, car_x, car_y, car_s, car_d, car_speed, car_yaw);
+  v = Vehicle(VEH_LENGTH, VEH_WIDTH, car_x, car_y, car_s, car_d, car_speed, car_yaw);
   o = obs;
 }
 
@@ -95,25 +108,25 @@ void sendTrajectory(uWS::WebSocket<uWS::SERVER> &ws, const Path &p)
 
 int main()
 {
-  // Web Socket Boiler plate
+  // Web Socket Boiler Plate
   uWS::Hub h;
 
-  // Load the map
+  // Load the map from file, given our length
   Map m = Map("../data/highway_map.csv", 6945.554);
 
-  // Load our Road, plus current (only...) settings
-  // Each Lane is 4m wide, with 3 lanes in total
-  // Speed limit on this road is 50MPH
-  Road r = Road({Lane(4), Lane(4), Lane(4)}, 48);
+  // Load our initial road. Our current (only...) settings have
+  // each Lane as 4m wide, with 3 lanes in total. The speed limit
+  // on this road is 50MPH
+  Road r = Road({Lane(4.0), Lane(4.0), Lane(4.0)}, SPEED_LIMIT);
 
   // Create our vehicle object
   Vehicle v = Vehicle();
-  v.length = 2.0; // meters
-  v.width = 4.0; // meters
-  v.d = 6; // We can make an educated guess at initial status
+  v.length = VEH_LENGTH; // 4.47 meters
+  v.width = VEH_WIDTH;   // 2.43 meters
+  v.d = 6.0; // We can make an educated guess at initial status
 
   // Virtual Driver options and object
-  int prediction_horizon = 75;
+  double prediction_horizon = 1.50; // 75 steps
   VirtualDriver driver = VirtualDriver(v, r, m, prediction_horizon);
 
   // What we're gonna do on each message
@@ -158,8 +171,9 @@ int main()
           // Ingest all the incoming data into the Virtual Driver
           //    Sensor Fusion --> What is around me right now?
           //    Localization --> Where am I in the world now?
-          // This two things will feed the prediction and behavior planning, which will feed
-          // The trajectory planning
+          // These two things will feed the prediction and behavior planning,
+          // which will feed the trajectory planning. We also grab the previous
+          // path points to help our algorithm smoothly transition onward
           driver.vehicle_update(v);
           driver.path_history_update(prev_path);
           driver.sensor_fusion_updates(ts, obs);

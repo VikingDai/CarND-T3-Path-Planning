@@ -1,9 +1,10 @@
-#ifndef WAYMAP_H
-#define WAYMAP_H
+#ifndef MAP_H
+#define MAP_H
 
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <cmath>
 
 class Map {
   public:
@@ -27,4 +28,4 @@ class Map {
     ~Map();
 };
 
-#endif // __WAYMAP_H__
+#endif // __MAP_H__

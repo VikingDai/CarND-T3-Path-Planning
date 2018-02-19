@@ -7,16 +7,18 @@
 class Trajectory {
   public:
 
+    // Id of behavior this Trajectory corresponds to
+    int behavior;
+
     // A trajectory is a set of two JMTs, a time horizon and a cost
-    std::string behavior;
     double T;
     JMT s;
     JMT d;
     double cost;
 
     Trajectory(){};
-    Trajectory(const JMT &_s, const JMT &_d, const double &_t, const double &_c = 0){behavior = "?"; s = _s; d = _d; T = _t; cost = _c;};
-    Trajectory(const std::string &_b, const JMT &_s, const JMT &_d, const double &_t, const double &_c = 0){behavior = _b; s = _s; d = _d; T = _t; cost = _c;};
+    Trajectory(const JMT &_s, const JMT &_d, const double &_t, const double &_c = 0){behavior = -1; s = _s; d = _d; T = _t; cost = _c;};
+    Trajectory(const int &_b, const JMT &_s, const JMT &_d, const double &_t, const double &_c = 0){behavior = _b; s = _s; d = _d; T = _t; cost = _c;};
     ~Trajectory(){};
 };
 

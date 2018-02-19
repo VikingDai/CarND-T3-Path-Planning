@@ -6,21 +6,21 @@
 #include "lane_follow.h"
 
 #include <iostream>
-#define DEBUG
-#define DEBUG_COST
+// #define DEBUG
+// #define DEBUG_COST
 
 using namespace std;
 
-LaneFollow::LaneFollow(){
+LaneFollow::LaneFollow()
+{
+  distance_buffer = 3.0; // meters, fixed distance of safety past a time gap
+  time_gap = 0.5;        // seconds,
 
-  distance_buffer = 5.0; // meters, fixed distance of safety past a time gap
-  time_gap = 1.0;        // seconds,
-
-  dt = 0.05;  // time delta for summing integral costs
+  dt = 0.1;  // time delta for summing integral costs
 
   k_j = 2.0; // Coeff for jerk cost
   k_t = 1.0; // Coeff for time cost
-  k_s = 20.0; // Coeff for lat movement cost
+  k_s = 25.0; // Coeff for lat movement cost
   k_d = 1.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
@@ -31,21 +31,24 @@ LaneFollow::~LaneFollow(){/* Nothing to do here*/}
 
 std::string LaneFollow::name() const {return "Lane Following";}
 
-void LaneFollow::add_trajectories(TrajectorySet &t_set,
+int LaneFollow::add_trajectories(TrajectorySet &t_set,
                                   double si, double si_dot, double si_dot_dot,
                                   double di, double di_dot, double di_dot_dot,
-                                  const int &current_lane, const Road &r,
-                                  ObstacleTracker &o) const
+                                  const int &current_lane, const int &reference_lane,
+                                  const Road &r, ObstacleTracker &o) const
 {
 
   #ifdef DEBUG
   cout << " [-] Determing trajectories for '" << name() << "'" << endl;
   #endif
 
+  // Keep track of how many trajectories are added
+  int added = 0;
+
   // Assuming we're following our lane, get the vehicle you're supposed to be
   // following from the tracker. If theres no one to follow, we're done
   int follow_id = o.vehicle_to_follow();
-  if(follow_id == -1) return;
+  if(follow_id == -1) return added;
   Obstacle following = o.get_vehicle(follow_id);
 
   // Grab the following objects position, speed, acceleration
@@ -67,7 +70,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
   double target_d = r.get_lane_mid_frenet(current_lane);
 
   // Iterate on possible T values for this behavior
-  double target_T = max(abs(si_dot - follow_s_dot) / 7.0, 1.5); // seconds
+  double target_T = max(abs(si_dot - follow_s_dot) / 2.0, 1.5); // seconds
   double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
   double max_T = target_T + 8.0 * dT;
@@ -125,7 +128,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
     JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
 
     // Turn our JMTs into a full blown trajectory
-    Trajectory traj = Trajectory(name(), s_path, d_path, T);
+    Trajectory traj = Trajectory(id, s_path, d_path, T);
 
     // Get the cost of the trajectory, set it
     double c = cost(traj, target_s, target_d, target_s_dot, follow_s_final, speed_limit);
@@ -137,6 +140,7 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
 
     // Add traj to our set of possible trajectories
     insert_traj_sorted(t_set, traj);
+    ++added;
 
     #ifdef DEBUG_COST
     if(c < min_c) min_c = c;
@@ -152,6 +156,8 @@ void LaneFollow::add_trajectories(TrajectorySet &t_set,
        << "   - max: " << max_c << endl
        << "   - min: " << min_c << endl;
   #endif
+
+  return added;
 }
 
 // Calculate a cost for this behavior

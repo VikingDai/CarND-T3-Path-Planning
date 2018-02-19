@@ -52,7 +52,7 @@ class VirtualDriver {
 
     // Init with a vehicle, map, road, and desired planning horizon
     VirtualDriver(const Vehicle initial_status, const Road &r, const Map &m,
-                  const int planning_horizon);
+                  const double planning_horizon);
 
     //-----------------------------------------------------------------------//
     // Virtual Driver Public State Updates                                   //
@@ -72,6 +72,10 @@ class VirtualDriver {
 
     // Update road's characteristics
     void road_update(const Road &r);
+
+    //-----------------------------------------------------------------------//
+    // Virtual Driver Path Plan Interface                                    //
+    //-----------------------------------------------------------------------//
 
     // Given the internal state, plan the path
     Path plan_route();
@@ -122,9 +126,17 @@ class VirtualDriver {
     JMT m_cur_s_coeffs;
     JMT m_cur_d_coeffs;
 
+    // Define a "reference" lane that our car should be following. Represents
+    // the target D value in all cases. Changes on lane change intent
+    int m_reference_lane;
+
     // Keep a set of possible vehicle states, which each define the rules for
     // their own trajectories and costs
+    int m_current_behavior;
     std::vector<Behavior *> m_vehicle_behaviors;
+
+    // Get the next behavior from our set of behaviors, given our current one
+    BehaviorSet get_next_behaviors();
 
     // Generate a set of possible trajectories given our current state
     TrajectorySet generate_trajectories();

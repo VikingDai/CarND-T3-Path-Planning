@@ -15,20 +15,17 @@ JMT::~JMT(){}
 // states to change
 JMT::JMT(const std::vector<double> &start, const std::vector<double> &end, const double t)
 {
-  #ifdef DEBUG
-  cout << "        + CREATING JMT(1)" << endl;
-  #endif
-
   MatrixXd A = MatrixXd(3,3);
   VectorXd b = VectorXd(3);
   VectorXd x = VectorXd(3);
-  this->coeffs = VectorXd(6);
 
+  // pre-compute times
   const double t2 = t * t;
   const double t3 = t * t2;
   const double t4 = t * t3;
   const double t5 = t * t4;
 
+  // save position, velocity and acceleration states
   const double pi = start[0];
   const double vi = start[1];
   const double ai = start[2];
@@ -36,6 +33,7 @@ JMT::JMT(const std::vector<double> &start, const std::vector<double> &end, const
   const double vf = end[1];
   const double af = end[2];
 
+  // solve
   A <<   t3,     t4,    t5,
        3*t2,   4*t3,  5*t4,
        6*t ,  12*t2, 20*t3;
@@ -46,52 +44,34 @@ JMT::JMT(const std::vector<double> &start, const std::vector<double> &end, const
 
   x = A.inverse() * b;
 
+  this->coeffs = VectorXd(6);
   this->coeffs << pi, vi, (ai / 2.0), x[0], x[1], x[2];
 }
 
 // Create a JMT given just the starting state, a target velocity, and a time to reach
-// that velocity
+// that velocity. Note that with this, its assumed that the final acceleration is to
+// be zero and that the final position doesn't matter as it'll change based on the
+// given time frame and desired velocity
 JMT::JMT(const std::vector<double> &start, const double target_velocity, const double t)
 {
-  #ifdef DEBUG
-  cout << "        + CREATING JMT(2)" << endl;
-  #endif
-
+  // pre-compute times
   const double t2 = t * t;
   const double t3 = t2 * t;
 
+  // initial position, velocity and acceleration states
   const double pi = start[0];
   const double vi = start[1];
   const double ai = start[2];
-
-  #ifdef DEBUG
-  cout << "        + target v: " << target_velocity << endl;
-  cout << "        + pi: " << pi << endl;
-  cout << "        + vi: " << vi << endl;
-  cout << "        + ai: " << ai << endl;
-  #endif
 
   MatrixXd A(2, 2);
   A << 3*t2,  4*t3,
         6*t, 12*t2;
 
-  #ifdef DEBUG
-  cout << "          + Made A(2, 2)" << endl;
-  #endif
-
   VectorXd b(2);
   b << target_velocity - vi - ai * t,
        0. - ai;
 
-  #ifdef DEBUG
-  cout << "          + Made B(2)" << endl;
-  #endif
-
   Vector2d x = A.colPivHouseholderQr().solve(b);
-
-  #ifdef DEBUG
-  cout << "          + Solved -> x(2)" << endl;
-  #endif
 
   this->coeffs = VectorXd(6);
   this->coeffs << pi, vi, (ai / 2.0), x[0], x[1], 0.0;

@@ -14,7 +14,11 @@ namespace Constants
 
   // Use for determining if theres a car to the side, also used to determine
   // where "front" starts
-  constexpr double CAR_LENGTH = 4.0;
+  constexpr double CAR_LENGTH = 4.47;
+
+  // Use for determining if theres a car to the side, also used to determine
+  // where "front" starts
+  constexpr double CAR_WIDTH = 2.43;
 
   //-----------------------------------------------------------------------//
   // Sensor Fusion System Constants                                        //

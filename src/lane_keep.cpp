@@ -11,12 +11,13 @@
 
 using namespace std;
 
-LaneKeep::LaneKeep(){
-  dt = 0.05;  // time delta for summing integral costs
+LaneKeep::LaneKeep()
+{
+  dt = 0.1;  // time delta for summing integral costs
 
   k_j = 2.0; // Coeff for jerk cost
   k_t = 1.0; // Coeff for time cost
-  k_s = 20.0; // Coeff for lat movement cost
+  k_s = 25.0; // Coeff for lat movement cost
   k_d = 1.0; // Coeff for lon movement cost
 
   k_lon = 1.0; // weight of lon costs
@@ -27,28 +28,30 @@ LaneKeep::~LaneKeep(){/* Nothing to do here*/}
 
 std::string LaneKeep::name() const {return "Lane Keeping";}
 
-void LaneKeep::add_trajectories(TrajectorySet &t_set,
+int LaneKeep::add_trajectories(TrajectorySet &t_set,
                                 double si, double si_dot, double si_dot_dot,
                                 double di, double di_dot, double di_dot_dot,
-                                const int &current_lane, const Road &r,
-                                ObstacleTracker &o) const
+                                const int &current_lane, const int &reference_lane,
+                                const Road &r, ObstacleTracker &o) const
 {
   #ifdef DEBUG
   cout << " [-] Determing trajectories for '" << name() << "'" << endl;
   #endif
 
-  // Target values
+  // Record how many trajectories we've added
+  int added = 0;
+
+  // Target velocity keeping values
   double speed_limit = r.speed_limit;
-  double target_speed = r.speed_limit; //o.lane_speed(current_lane);
+  double target_speed = r.speed_limit;
+
+  // Target lateral final position
   double target_d = r.get_lane_mid_frenet(current_lane);
 
   // for a "close-ness" cost
   int follow_id = o.vehicle_to_follow();
   double follow_ds = 0.0;
   if(follow_id != -1) follow_ds = o.get_vehicle(follow_id).s;
-
-  // check inputs
-  //if(target_speed > speed_limit) target_speed = speed_limit;
 
   // Define constraint ranges
   // NOTE: Its important to think about whats reasonable here. For example,
@@ -61,24 +64,28 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
   // NOTE: As such, I'm using naive kinematics to try to pick a target time
   // all while being careful to not have a target time that too low. A short
   // JMT could have weird things happen past the time line
-  double target_T = max(abs(target_speed - si_dot) / 7.0, 1.5);
+
+  // Time contraints
+  double target_T = max(abs(target_speed - si_dot) / 3.0, 1.5);
   double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
   double max_T = target_T + 6.0 * dT;
 
+  // Velocity contraints
   double min_V = target_speed - 10.0; // m/s -- NOTE: 50MPH -> 22.352
   double max_V = target_speed;
-  double dV = (max_V - min_V) / 10.0;
+  double dV = (max_V - min_V) / 6.0;
 
-  #ifdef DEBUG_COST
+  #ifdef DEBUG
   cout << " [*] Trying " << ((max_V - min_V) / dV) * ((max_T - min_T) / dT) << " combinations" << endl;
   cout << " [-] Varying given:" << endl
-       << "   - (T should be: abs(" << speed_limit << " - " << si_dot << ") / 8.0 = " << abs(speed_limit - si_dot) / 8.0 << endl
+       << "   - (T should be: abs(" << speed_limit << " - " << si_dot << ") / 6.0 = " << target_T << endl
        << "   - T = " << min_T << " and T = " << max_T << endl
        << "   - v = " << min_V << " and v = " << max_V <<  ", dV = " << dV << endl
+       << "   - current_lane: " << current_lane << endl
+       << "   - reference_lane: " << reference_lane << endl
        << "   - target_speed: " << target_speed << endl
-       << "   - max_speed: " << speed_limit << endl
-       << "   - target_d: " << target_d << endl;
+       << "   - max_speed: " << speed_limit << endl;
   #endif
 
   #ifdef DEBUG_COST
@@ -88,20 +95,35 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
   static int N = 0;
   #endif
 
-  // Vary T and v to generate a bunch of possible s paths
-  for(double v = min_V; v <= max_V; v += dV)
+  // Iterate on possible time frames
+  for(double T = min_T; T <= max_T; T += dT)
   {
-    for(double T = min_T; T <= max_T; T += dT)
+    // Given this time, calculate a given d_path separately from all the
+    // possible velocity choices
+    JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
+
+    // Vary longitudinal velocities here to get an s_path and final traj
+    for(double v = min_V; v <= max_V; v += dV)
     {
+      #ifdef DEBUG
+      cout << " [-] Trying Keeping Traj:" << endl
+           << "   - si: " << si << endl
+           << "   - si_d: " << si_dot << endl
+           << "   - si_d_d: " << si_dot_dot << endl
+           << "   - di: " << di << endl
+           << "   - di_d: " << di_dot << endl
+           << "   - di_d_d: " << di_dot_dot << endl
+           << "   - target_d: " << target_d << endl
+           << "   - target_V: " << v << endl
+           << "   - T: " << T << endl;
+      #endif
+
       // S trajectory will be created given our target start state,
       // target velocity, and a target time horizon
       JMT s_path = JMT({si, si_dot, si_dot_dot}, v, T);
 
-      // Vary just T to generate a matching d path.
-      JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
-
       // Turn our JMTs into a full blown trajectory
-      Trajectory traj = Trajectory(name(), s_path, d_path, T);
+      Trajectory traj = Trajectory(id, s_path, d_path, T);
 
       // Get the cost of the trajectory, set it
       // cost based on how far off we are from speed limit
@@ -117,6 +139,7 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
 
       // Add traj to our set of possible trajectories
       insert_traj_sorted(t_set, traj);
+      ++added;
     }
   }
 
@@ -126,6 +149,8 @@ void LaneKeep::add_trajectories(TrajectorySet &t_set,
        << "   - max: " << max_c << endl
        << "   - min: " << min_c << endl;
   #endif
+
+  return added;
 }
 
 // Calculate a cost for this behavior

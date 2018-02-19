@@ -13,8 +13,11 @@ using namespace std;
 * Utility Functions and Helpers                                               *
 ******************************************************************************/
 
-// TO-DO: Define a Util header?
-// TO-DO: Define a WayPoint class for dealing with all the frenet stuff
+// TO-DO: Define a Util header? Put constants and helper functions in there.
+// TO-DO: Define a WayPoint class for dealing with all the frenet stuff? Or,
+//        put it in the map class. Might be nicer that way since only the
+//        map really cares about the way points. Erryone else just wants points
+//        to be translated between Frenet and Cartesian
 
 // time between steps
 static const double TIME_DELTA = 0.02;
@@ -215,7 +218,7 @@ VirtualDriver::~VirtualDriver()
 
 // Non-Default Constructor
 VirtualDriver::VirtualDriver(const Vehicle initial_status, const Road &r,
-                             const Map &m, const int planning_horizon)
+                             const Map &m, const double planning_horizon)
 {
   // Map data
   mMap = m;
@@ -224,9 +227,11 @@ VirtualDriver::VirtualDriver(const Vehicle initial_status, const Road &r,
   mRoad = r;
   mRoad.speed_limit = MPH_TO_MPS(mRoad.speed_limit);
 
+  // Planning timing parameters - convert times in seconds to steps
+  m_planning_horizon = planning_horizon / TIME_DELTA;
+
   // Intial pathing status
   m_prev_points_left = 0;
-  m_planning_horizon = planning_horizon;
   m_cur_s_coeffs = JMT();
   m_cur_d_coeffs = JMT();
   m_last_followed_window_size = 11;
@@ -235,13 +240,38 @@ VirtualDriver::VirtualDriver(const Vehicle initial_status, const Road &r,
   m_tracker = ObstacleTracker(55, 5);
 
   // Behaviors this Driver can plan for
-  m_vehicle_behaviors = std::vector<Behavior *>(2, NULL);
+  m_vehicle_behaviors = std::vector<Behavior *>(3, NULL);
   m_vehicle_behaviors[0] = new LaneKeep();
   m_vehicle_behaviors[1] = new LaneFollow();
-  // m_vehicle_behaviors[2] = new LaneChange();
+  m_vehicle_behaviors[2] = new LaneChange();
+
+  // Set up our FSM for our behaviors
+  //
+  //                 +--+  * implementation has
+  //                 |  |    logic to sometimes
+  //                 v  |    limit this to {2}
+  //     (LANE CHANGE)--+
+  //      ^         ^
+  //      |         |
+  //      v         v
+  // (KEEP)<------>(FOLLOW)
+  //
+  m_vehicle_behaviors[0]->id = 0;
+  m_vehicle_behaviors[1]->id = 1;
+  m_vehicle_behaviors[2]->id = 2;
+  m_vehicle_behaviors[0]->next_behaviors = {0, 1, 2};
+  m_vehicle_behaviors[1]->next_behaviors = {0, 1, 2};
+  m_vehicle_behaviors[2]->next_behaviors = {0, 1, 2};
+
+  // Keeping is current
+  m_current_behavior = 0;
+  m_vehicle_behaviors[0]->current = true;
 
   // Initial Ego car state
   mVeh = initial_status;
+
+  // Initial reference lane is whatever we're in
+  m_reference_lane = mRoad.get_vehicle_lane(mVeh);
 }
 
 /******************************************************************************
@@ -343,6 +373,16 @@ void VirtualDriver::path_history_update(const Path &prev)
 // the lines are super blurred here because of how closely these layers work
 // together
 
+// Get the next behavior from our set of behaviors, given our current one
+BehaviorSet VirtualDriver::get_next_behaviors()
+{
+  // If we haven't initialized a behavior, anything goes! <-- shouldnt happen
+  if(m_current_behavior == -1) return {0, 1, 2};
+
+  // Otherwise, the behaviors store their own next states
+  else return m_vehicle_behaviors[m_current_behavior]->get_next_behaviors(mVeh.s, mVeh.d, mRoad, m_reference_lane);
+}
+
 // Calculate trajectories for an action, given where we are now and whats
 // around us
 TrajectorySet VirtualDriver::generate_trajectories()
@@ -358,12 +398,15 @@ TrajectorySet VirtualDriver::generate_trajectories()
   int current_lane = mRoad.get_vehicle_lane(mVeh);
 
   // Calculate an index based on how many dots have been eaten
-  // and how many we've decided to consistently plan out to
-  int start_ind = m_planning_horizon - m_prev_points_left - 1;
+  // and how many we've decided to consistently plan out to.
+  // We can pull our initial status off this
+  int start_ind = (m_planning_horizon - m_prev_points_left - 1);
+
+  // Set the start time based on our start index
   double start_time = start_ind * TIME_DELTA;
 
   // Initial take off state based on current trajectory
-  // NOTE: These will be overwritten if there's no existing path
+  // NOTE: These will be overwritten below if there's no existing path
   si = m_cur_s_coeffs.get_position_at(start_time);
   si_dot = m_cur_s_coeffs.get_velocity_at(start_time);
   si_dot_dot = m_cur_s_coeffs.get_acceleration_at(start_time);
@@ -388,6 +431,7 @@ TrajectorySet VirtualDriver::generate_trajectories()
   }
 
   // Watch out for start states that wrap around the map tile we've got
+  // Velocity and acceleration shouldn't matter but position certainly does
   if(si >= mMap.max_s) si -= mMap.max_s;
 
   // I've seen weird cases where I might collide with a car and get a negative
@@ -405,28 +449,36 @@ TrajectorySet VirtualDriver::generate_trajectories()
             << "   - di_d:  " << di_dot << std::endl
             << "   - di_dd: " << di_dot_dot << std::endl
             << "   - current_lane: " << current_lane << std::endl
+            << "   - reference_lane: " << m_reference_lane << std::endl
             << "   - speed_limit: " << mRoad.speed_limit << " m/s" << std::endl;
   #endif
+
+  // Get our next possible behaviors from our current one
+  BehaviorSet next_behaviors = get_next_behaviors();
 
   // With our current set of starting conditions and some final conditions set
   // we can now vary parameters to generate a set of possible trajectories we
   // can follow.
-  for(int i = 0; i < m_vehicle_behaviors.size(); ++i)
+  int count = -1;
+  for(int i = 0; i < next_behaviors.size(); ++i)
   {
+    int j = next_behaviors[i];
+
     #ifdef DEBUG
-    std::cout << " [*] Behavior " << i + 1 << ": " << m_vehicle_behaviors[i]->name() << std::endl;
-    int t_count = n_possible_trajectories.size();
+    cout << " [*] Behavior (ID " << j << "): "
+         << m_vehicle_behaviors[j]->name()
+         << endl;
     #endif
 
-    m_vehicle_behaviors[i]->add_trajectories(n_possible_trajectories,
-                                             si, si_dot, si_dot_dot,
-                                             di, di_dot, di_dot_dot,
-                                             current_lane, mRoad,
-                                             m_tracker);
+    count = m_vehicle_behaviors[j]->add_trajectories(n_possible_trajectories,
+                                                   si, si_dot, si_dot_dot,
+                                                   di, di_dot, di_dot_dot,
+                                                   current_lane, m_reference_lane,
+                                                   mRoad, m_tracker);
 
     #ifdef DEBUG
-    std::cout << " [+] Added " << n_possible_trajectories.size() - t_count
-              << " for '" << m_vehicle_behaviors[i]->name() << "'" << std::endl;
+    std::cout << " [+] Added " << count << " for '"
+              << m_vehicle_behaviors[j]->name() << "'" << std::endl;
     #endif
   }
 
@@ -583,7 +635,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
     double v =  dist / TIME_DELTA;
 
     #ifdef DEBUG
-    cout << " [&] Evaluated (" << p.x[i] << ", " << p.y[i] << ") -- v = " << v << endl;
+    cout << " [&] Evaluated " << i -1 << " to " << i << "(" << p.x[i] << ", " << p.y[i] << ") -- v = " << v << endl;
     #endif
 
     // Always check velocity each step
@@ -642,6 +694,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
       // NEW METHOD: Fit a circle and take the radius
       Circle c = Circle({last_x2, last_y2}, {last_x, last_y}, {p.x[i], p.y[i]});
       double r_o_c = c.radius();
+      if(r_o_c < 0) r_o_c = 1000000000000.0; // really big number
 
       #ifdef DEBUG
       cout << " [&] ROC: " << r_o_c << endl;
@@ -661,7 +714,7 @@ bool VirtualDriver::comfortable(Trajectory &traj)
       #endif
 
       // See if we violate the max acceleration
-      if(abs(accT) >= MAX_ACC_MAG)
+      if(abs(a) >= MAX_ACC_MAG)
       {
         #ifdef DEBUG
         std::cout << " [*] Rejected for acceleration:" << std::endl
@@ -719,7 +772,7 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
 
     #ifdef DEBUG
     std::cout << " [*] Removed Trajectory:" << std::endl
-              << "   - type: " << (*it).behavior << std::endl
+              << "   - type: " << m_vehicle_behaviors[(*it).behavior]->name() << std::endl
               << "   - s: " << (*it).s << std::endl
               << "   - d: " << (*it).d << std::endl
               << "   - cost: " << (*it).cost << std::endl
@@ -727,9 +780,13 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
     #endif
   }
 
+  #ifdef DEBUG
+  cout << "SHIT FUCK AHHHH DEFAULT TO THE LAST ONE?" << endl;
+  #endif
+
   // Default to the last path we had I guess?
   // TO-DO: What the heck do people do in real life here? Emergency stop?
-  Trajectory def = Trajectory(m_cur_s_coeffs, m_cur_d_coeffs, 0);
+  Trajectory def = Trajectory(m_current_behavior, m_cur_s_coeffs, m_cur_d_coeffs, 0);
 
   return def;
 }
@@ -743,24 +800,15 @@ Trajectory VirtualDriver::optimal_trajectory(TrajectorySet &possible_trajectorie
 // Convert a Trajectory into an actual followable set of way points
 Path VirtualDriver::generate_path(const Trajectory &traj)
 {
-  // Extract JMTs
-  JMT jmt_s = traj.s;
-  JMT jmt_d = traj.d;
-
-  // How long to plan for and how to step
-  double td = TIME_DELTA;
-  int n = m_planning_horizon;
-
   // To contain points for the final path object
   std::vector<double> xpts;
   std::vector<double> ypts;
   double s, d;
 
-  // Generate the path
-  for (int i = 0; i < n; ++i)
+  for(int i = 0; i < m_planning_horizon; ++i)
   {
-    s = jmt_s.at(((double) i) * td);
-    d = jmt_d.at(((double) i) * td);
+    s = traj.s.at(((double) i) * TIME_DELTA);
+    d = traj.d.at(((double) i) * TIME_DELTA);
 
     // Check if the (s, _) point falls outside the map, which
     // can happen because the JMT doesn't care!
@@ -776,6 +824,7 @@ Path VirtualDriver::generate_path(const Trajectory &traj)
 }
 
 // Convert a Trajectory into a smoothed, actual followable path for the simulator
+// NOTE: Currently Unused
 Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 {
   // Get the normal path
@@ -905,6 +954,7 @@ Path VirtualDriver::generate_smoothed_path(const Trajectory &traj)
 }
 
 // Convert a Trajectory into a smoothed, actual followable path for the simulator
+// NOTE: Currently Unused
 Path VirtualDriver::generate_smoothed_path_2(const Trajectory &traj)
 {
   // Get the normal path - sets of x and y points
@@ -978,7 +1028,7 @@ Path VirtualDriver::plan_route()
 {
   // Debug state printing
   #ifdef DEBUG
-  cout << " [+] Our speed: " << mVeh.speed << endl;
+  cout << " [+] Our speed: " << mVeh.speed << " m/s" << endl;
   cout << m_tracker.get_debug_lanes();
   #endif
 
@@ -986,6 +1036,7 @@ Path VirtualDriver::plan_route()
   static int step = 0;
   std::stringstream ss;
   ss << " [+] step: " << step++ << "\n"
+     << " [+] planning_horizon: " << m_planning_horizon << "\n"
      << " [+] road speed limit: " << MPS_TO_MPH(mRoad.speed_limit) << " mph | "
      << mRoad.speed_limit << " m/s\n"
      << " [+] road width: " << mRoad.width << "\n"
@@ -995,7 +1046,19 @@ Path VirtualDriver::plan_route()
      << " [+] vehicle yaw: " << mVeh.yaw << " degrees | "
      << deg2rad(mVeh.yaw) << " rad/s\n"
      << " [+] vehicle speed: " << mVeh.speed << " m/s | "
-     << MPS_TO_MPH(mVeh.speed) << " mph" << "\n";
+     << MPS_TO_MPH(mVeh.speed) << " mph" << "\n"
+     << " [+] reference lane: " << m_reference_lane << "\n"
+     << " [+] m_current_behavior: (" << m_current_behavior << ") "
+     << m_vehicle_behaviors[m_current_behavior]->name() << "\n"
+     << " [+] Possible Next behaviors:\n";
+    BehaviorSet next_behaviors = get_next_behaviors();
+    for(int i = 0; i < next_behaviors.size(); ++i)
+    {
+      if(m_vehicle_behaviors[next_behaviors[i]]->current) ss << "\033[0;32m";
+      ss << "    - " << m_vehicle_behaviors[next_behaviors[i]]->name() << "\t";
+      if(m_vehicle_behaviors[next_behaviors[i]]->current) ss << "\033[0m";
+    }
+    ss << endl;
   #endif
 
   // TRAJECTORY POOLING:
@@ -1018,16 +1081,16 @@ Path VirtualDriver::plan_route()
 
   #ifdef CLI_OUTPUT
   bool found = false;
-  ss << " [*] Looking at top 102 (of " << possible_trajectories.size() << "):\n";
+  ss << " [*] Looking at top 96 (of " << possible_trajectories.size() << "):\n";
   ss << "\033[0;31m";
-  for(int i = 0; i < 102 && i < possible_trajectories.size(); ++i)
+  for(int i = 0; i < 96 && i < possible_trajectories.size(); ++i)
   {
     if(trajs_are_same(possible_trajectories[i], opt))
     {
       ss << "\033[0;32m";
       found = true;
     }
-    ss << "   - " << possible_trajectories[i].behavior << " - "
+    ss << "   - " << m_vehicle_behaviors[possible_trajectories[i].behavior]->name() << " - "
        << possible_trajectories[i].cost;
     if(found) ss << "\033[0m";
     if((i + 1) % 3 == 0) ss << "\n";
@@ -1038,8 +1101,9 @@ Path VirtualDriver::plan_route()
 
   #ifdef CLI_OUTPUT
   ss << m_tracker.get_debug_lanes();
-  ss << " [*] Behavior: " << opt.behavior << " (" << opt.cost << ")" << "\n"
+  ss << " [*] Behavior: " << m_vehicle_behaviors[opt.behavior]->name() << " (" << opt.cost << ")" << "\n"
      << " [*] Target time: " << opt.T << "\n"
+     << " [*] Target Lane: " << mRoad.get_lane(opt.d.at(opt.T)) << "\n"
      << " [*] Target sf_dot: " << opt.s.get_velocity_at(opt.T) << " m/s | "
      << MPS_TO_MPH(opt.s.get_velocity_at(opt.T)) << " mph\n";
 
@@ -1052,25 +1116,46 @@ Path VirtualDriver::plan_route()
 
   #ifdef DEBUG
   std::cout << " [*] Optimal Traj Found!" << std::endl
-            << "   - type: " << opt.behavior << std::endl
+            << "   - type: " << m_vehicle_behaviors[opt.behavior]->name() << std::endl
             << "   - s: " << opt.s << std::endl
             << "   - d: " << opt.d << std::endl
             << "   - cost: " << opt.cost << std::endl
             << "   - T: " << opt.T << std::endl;
+  if(mRoad.get_lane(opt.d.at(opt.T)) != m_reference_lane)
+  {
+    std::cout << "[*] Beginning a lane change from lane "
+              << m_reference_lane << " to "
+              << mRoad.get_lane(opt.d.at(opt.T)) << endl;
+  }
   #endif
+
+  // Clear/Set current behavior
+  if(opt.behavior != m_current_behavior)
+  {
+    for(int i = 0; i < m_vehicle_behaviors.size(); ++i)
+    {
+      if(i == opt.behavior) m_vehicle_behaviors[i]->current = true;
+      else m_vehicle_behaviors[i]->current = false;
+    }
+    m_current_behavior = opt.behavior;
+    m_reference_lane = mRoad.get_lane(opt.d.at(opt.T));
+  }
 
   // Generate the final, follow-able path
   Path p = generate_path(opt);
 
-  #ifdef DEBUG
+  #ifdef DEBUG_PATH
   cout << " [^] Final output of path:" << endl;
   for(int i = 0; i < p.size(); ++i)
   {
-    cout << "    " << i << " | " << "(" << p.x[i] << ", " << p.y[i] << ")" << endl;
+    cout << "    " << i << " | " << "(" << p.x[i] << ", " << p.y[i] << ")";
+    if(i != 0) cout << " -- v = " << (distance(p.x[i-1], p.y[i-1], p.x[i], p.y[i]) / TIME_DELTA) << "m/s";
+    else cout << " -- v = ??.???? m/s";
+    cout << endl;
   }
   #endif
 
-  // Update our current trajectory and path
+  // Update our current trajectory, path, and reference lane
   m_last_path = p;
   m_cur_s_coeffs = opt.s;
   m_cur_d_coeffs = opt.d;

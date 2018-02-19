@@ -4,7 +4,7 @@
 using namespace std;
 
 // #define DEBUG
-// #define DEBUG_LITE
+#define DEBUG_LITE
 
 // Receive Sensor Fusion Updates
 // These come in with an ID for the object and an (x,y), (s,d) and (vx, vy)
@@ -341,8 +341,44 @@ Obstacle ObstacleTracker::get_vehicle(const int &id)
 
 bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
 {
-  double BUFFER_S = 2.0;
-  double BUFFER_D = 0.2;
+  // Cushy safe buffer space so we can keep extra careful
+  double BUFFER_S = 4.0;
+  double BUFFER_D = 0.75;
+
+  // Get the trajectory d bounds
+  double initial_lane = m_road.get_lane(traj.d.at(0));
+  double final_lane = m_road.get_lane(traj.d.at(traj.T));
+  double min_d = 0.0;
+  double max_d = m_road.width;
+
+  // Update d bounds based on the trajectory taking place
+  // If initial <= final we can do the following
+  // if(initial_lane <= final_lane)
+  // {
+  //   for(int i = 0; i < initial_lane; ++i)
+  //   {
+  //     min_d += m_road.lanes[i].width;
+  //     max_d += m_road.lanes[i].width;
+  //   }
+  //   for(int i = initial_lane; i <= final_lane; ++i)
+  //   {
+  //     max_d += m_road.lanes[i].width;
+  //   }
+  // }
+  //
+  // otherwise, we have to do this
+  // else
+  // {
+  //   for(int i = 0; i < final_lane; ++i)
+  //   {
+  //     min_d += m_road.lanes[i].width;
+  //     max_d += m_road.lanes[i].width;
+  //   }
+  //   for(int i = final_lane; i <= initial_lane; ++i)
+  //   {
+  //     max_d += m_road.lanes[i].width;
+  //   }
+  // }
 
   for(auto it = m_obstacles.begin(); it != m_obstacles.end(); ++it)
   {
@@ -376,10 +412,12 @@ bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
       double s = traj.s.at(T);
       double d = traj.d.at(T);
 
-      // Dont leave our side of the road... that aint safe mkay
-      if(d < 0.1 || d > m_road.width - 0.1)
+      // Dont leave our final destination lane or the sides of the road
+
+      if((d - m_veh.width / 2.0) < (min_d + BUFFER_D) ||
+         (d + m_veh.width / 2.0) > (max_d - BUFFER_D))
       {
-        #ifdef DEBUG
+        #ifdef DEBUG_LITE
         std::cout << "   - LEFT OUR SIDE OF THE ROAD!" << endl;
         #endif
         return false;
@@ -398,9 +436,9 @@ bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
 
       // Do they collide?
       // NOTE: I've seen some weird things were the car behind
-      // us going fast might suggest it woudl rear end us. I'm
+      // us going fast might suggest it would rear end us. I'm
       // going to throw out this idea though because thats not
-      // reaaaally our fault if we're already at the speed lim
+      // reaally our fault if we're already at the speed limit
       // for example.
       if(obs_s >= (s - m_veh.length / 2.0) - BUFFER_S &&
          obs_s <= (s + m_veh.length / 2.0) + BUFFER_S &&
@@ -408,7 +446,7 @@ bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
          obs_d <= (d + m_veh.width / 2.0) + BUFFER_D)
       {
         #ifdef DEBUG_LITE
-        std::cout << "  - COLLISION!" << endl;
+        std::cout << "  - COLLISION with Object ID " << obs_t.id << endl;
         #endif
 
         return false;

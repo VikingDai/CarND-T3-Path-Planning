@@ -14,11 +14,23 @@ class LaneChange: public Behavior {
   public:
     LaneChange();
     ~LaneChange();
-    void add_trajectories(TrajectorySet &t_set,
+
+    // Override the Behavior Type Default
+    BehaviorSet get_next_behaviors(const double s, const double d,
+                                   const Road &r, const int reference_lane) const;
+
+    int add_trajectories(TrajectorySet &t_set,
+                         double si, double si_dot, double si_dot_dot,
+                         double di, double di_dot, double di_dot_dot,
+                         const int &current_lane, const int &reference_lane,
+                         const Road &r, ObstacleTracker &o) const;
+
+
+    int add_trajectories_2(TrajectorySet &t_set,
                           double si, double si_dot, double si_dot_dot,
                           double di, double di_dot, double di_dot_dot,
-                          const int &current_lane, const Road &r,
-                          ObstacleTracker &o) const;
+                          const int &current_lane, const int &reference_lane,
+                          const Road &r, ObstacleTracker &o) const;
 
     std::string name() const;
 
