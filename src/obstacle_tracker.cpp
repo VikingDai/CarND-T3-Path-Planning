@@ -3,8 +3,8 @@
 #include <iostream>
 using namespace std;
 
-#define DEBUG
-#define DEBUG_LITE
+// #define DEBUG
+// #define DEBUG_LITE
 
 // Receive Sensor Fusion Updates
 // These come in with an ID for the object and an (x,y), (s,d) and (vx, vy)
@@ -342,7 +342,7 @@ Obstacle ObstacleTracker::get_vehicle(const int &id)
 bool ObstacleTracker::trajectory_is_safe(const Trajectory &traj)
 {
   // Cushy safe buffer space so we can keep extra careful
-  double BUFFER_S = 4.0;
+  double BUFFER_S = 4.5;
   double BUFFER_D = 0.75;
 
   // Get the trajectory d bounds

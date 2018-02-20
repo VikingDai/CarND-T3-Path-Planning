@@ -13,18 +13,21 @@ using namespace std;
 
 LaneFollow::LaneFollow()
 {
-  distance_buffer = 3.0; // meters, fixed distance of safety past a time gap
-  time_gap = 0.5;        // seconds,
+  distance_buffer = 3.0; // meters, fixed distance of safety
+  time_gap = 1.0;       // seconds, time based distance of safety
 
   dt = 0.1;  // time delta for summing integral costs
 
   k_j = 2.0; // Coeff for jerk cost
+  k_a = 2.0; // Coeff for acceleration cost
   k_t = 1.0; // Coeff for time cost
   k_s = 25.0; // Coeff for lat movement cost
   k_d = 1.0; // Coeff for lon movement cost
 
+  k_safety = 140.0; // Coeff for safety dist
+
   k_lon = 1.0; // weight of lon costs
-  k_lat = 0.1; // weight of lat costs
+  k_lat = 0.5; // weight of lat costs
 }
 
 LaneFollow::~LaneFollow(){/* Nothing to do here*/}
@@ -55,9 +58,11 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
   // Note: we could probably bake this into the prediction/tracker layer
   // as an API because we are, after all, watching these cars over frames.
   // It would probably help us get better trajectories
+  // Note: We really dont want to try to match a sim car's accel because they
+  // dont have the same rules we do. Might as well be safe
   double follow_s = following.s;
   double follow_s_dot = (following.s_dot == 0 ? following.speed : following.s_dot);
-  double follow_a = 0.0; // following.s_dot_dot;
+  double follow_a = 0.0;
 
   #ifdef DEBUG
   cout << " [-] Should be following 'Obstacle ID " << follow_id << "' at s = "
@@ -66,15 +71,16 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
   #endif
 
   // Our target values
+  double target_s_dot = r.speed_limit;
   double speed_limit = r.speed_limit;
   int current_lane = r.get_lane(di);
   double target_d = r.get_lane_mid_frenet(current_lane);
 
   // Iterate on possible T values for this behavior
-  double target_T = max(abs(si_dot - follow_s_dot) / 2.0, 1.5); // seconds
+  double target_T = max(abs(si_dot - follow_s_dot) / 2.0, 2.0); // seconds
   double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
-  double max_T = target_T + 8.0 * dT;
+  double max_T = target_T + 4.0 * dT;
 
   #ifdef DEBUG
   cout << " [*] Trying " << ((max_T - min_T) / dT) << " combinations" << endl;
@@ -85,7 +91,7 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
        << "   - Follow (s,d): (" << follow_s << ", " << following.d << ")" << endl
        << "   - Follow s_dot: " << follow_s_dot << endl
        << "   - Follow s_dot_dot: " << follow_a << endl
-       << "   - max_speed: " << speed_limit << endl
+       << "   - target_s_dot: " << target_s_dot << endl
        << "   - target_d: " << target_d << endl;
   #endif
 
@@ -104,9 +110,8 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
     double follow_s_dot_final = follow_s_dot + follow_a * T;
 
     // check speed input - limit to speed limit
-    double target_s_dot = follow_s_dot_final;
     double target_s_dot_dot = 0.0;
-    if(target_s_dot > speed_limit) target_s_dot = speed_limit;
+    if(follow_s_dot_final > speed_limit) follow_s_dot_final = speed_limit;
 
     // Determine our car's target s position based onthe car we're following
     double target_s = follow_s_final - (distance_buffer + time_gap * follow_s_dot_final);
@@ -122,8 +127,9 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
     #endif
 
     // S trajectory will be created given our target start state,
-    // final target s position, and a target time horizon
-    JMT s_path = JMT({si, si_dot, si_dot_dot}, {target_s, target_s_dot, target_s_dot_dot}, T);
+    // final target s position, and a target time horizon. The other
+    // pieces were calculated with kinematics, or assumed.
+    JMT s_path = JMT({si, si_dot, si_dot_dot}, {target_s, follow_s_dot_final, target_s_dot_dot}, T);
 
     // Vary just T to generate a matching d path.
     JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
@@ -132,7 +138,7 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
     Trajectory traj = Trajectory(id, s_path, d_path, T);
 
     // Get the cost of the trajectory, set it
-    double c = cost(traj, target_s, target_d, target_s_dot, follow_s_final, speed_limit);
+    double c = cost(traj, target_s_dot, target_d, follow_s_final);
     traj.cost = c;
 
     #ifdef DEBUG
@@ -162,25 +168,13 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
 }
 
 // Calculate a cost for this behavior
-// For following, we basically want to follow when:
-//   1) We're too close to a car in front of us
-//   2) We can't alen change
-// Thus, what this cost function should aim to do is:
-//   1) Pick the best following trajectory we can given
-//      jerk and acceleration WITHOUT letting those costs
-//      be great enough to discourage the act all together
-//   2) Penalize wanting to lane follow SLOWLY, to help us
-//      differentiate between following and changing
-//   3) Penalize following from far away such that we would
-//      rather keep lane and get closer to traffic, maybe
-//      to change lanes
-double LaneFollow::cost(const Trajectory &traj, const double &target_s,
-                        const double &target_d, const double &target_s_dot,
-                        const double &follow_sf, const double &speed_limit) const {
+double LaneFollow::cost(const Trajectory &traj, const double &target_s_dot,
+                        const double &target_d, const double &follow_sf) const
+{
 
   // Difference between target position and final position
-  double sf = traj.s.get_position_at(traj.T);
-  double s_delta_2 = (sf - target_s) * (sf - target_s);
+  double sf_dot = traj.s.get_velocity_at(traj.T);
+  double s_delta_2 = (sf_dot - target_s_dot) * (sf_dot - target_s_dot);
 
   // Difference between target lane position and final position
   double df = traj.d.get_position_at(traj.T);
@@ -207,55 +201,38 @@ double LaneFollow::cost(const Trajectory &traj, const double &target_s,
   J_t_lon /= (traj.T / dt);
   J_t_lat /= (traj.T / dt);
 
-  // Penalize driving slower than the speed limit to try to encourage
-  // our ego to keep or change lanes
-  // MIN: 0, MAX: 50*50 --> 2500
-  double sf_dot = traj.s.get_velocity_at(traj.T);
-  double C_speed_limit = 1.75 * (sf_dot - speed_limit) * (sf_dot - speed_limit);
+  // Try using AVERAGE accel to get rid of the issues that come with using
+  // longer time frames
+  A_t_lon /= (traj.T / dt);
+  A_t_lat /= (traj.T / dt);
 
-  // Penalize choosing to follow lane and get close to the car in front
-  // Should help encourage more lane changes
-  double follow_ds = (follow_sf - sf);
-  double C_follow_distance = 15000.0 / (follow_ds * follow_ds);
+  // Calculate a safety distance cost based on our final position and the
+  // vehicle we're following's final position. Take away the follow dist
+  // we've imposed
+  double sf = traj.s.get_position_at(traj.T);
+  double inv_follow_dist = 1.0 / (follow_sf - sf);
+  if(follow_sf == -1) inv_follow_dist = 0.0;
+  else if(sf >= follow_sf) inv_follow_dist = 0.2;
+  double C_safety_dist = exp(k_safety * abs(inv_follow_dist));
 
   // Get the total Lateral Trajectory cost
-  // s cost is penalizing the magnitude of the distance from target speed
   //             (  JERK COST  )   (  TIME COST )   (      LAT COST     )
-  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_s * s_delta_2);
+  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_s * s_delta_2) + (k_a * A_t_lon);
 
   // Get the total Longitudinal Trajectory cost
-  // d cost is chosen as (df - target_d)^2 because we ideally converge on
-  // d = target_d and keep that d and we want to punish trajectories that
-  // dont converge. Its NOT integral because most trajectories should just
-  // be working on converging the whole time. We dont want to punish slow
-  // convergence because it actually might be ideal and most comfortable!
   //             (  JERK COST  )   (  TIME COST )   (    LON COST   )
-  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_d * d_delta_2);
-
-  // Extra costs outside of the algorithm
-  double C_extra = 0.0; //(A_t_lat + A_t_lon) + C_speed_limit;
+  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_d * d_delta_2) + (k_a * A_t_lat);
 
   #ifdef DEBUG_COST
   cout << " [*] Cost Breakdown:" << endl
-       << "   - Sf_FINAL: " << sf_dot << endl
-       << "   - target s: " << target_s << endl
-       << "   - s_final: " << sf << endl
-       << "   - s_delta: " << s_delta_2 << endl
-       << "   - s_delta_scaled: " << k_s * s_delta_2 << endl
-       << "   - Time Frame: " << traj.T << endl
        << "   - C_lon: " << k_lon * C_lon << endl
        << "     - J_lon: " << (k_j * J_t_lon) << endl
        << "   - C_lat: " << k_lat * C_lat << endl
        << "     - J_lat: " << (k_j * J_t_lat) << endl
-       << "   - C_time: " << (k_t * traj.T) << endl
-       << "   - C_extra: " << C_extra << endl
-       << "     - A_Lat: " << A_t_lat << endl
-       << "     - A_Lon: " << A_t_lon << endl
-       << "     - A_comb: " << (A_t_lat + A_t_lon) << endl
-       << "     - speed_limit_delta: " << C_speed_limit << endl
-       << "   - TOTAL: " << k_lat * C_lat + k_lon * C_lon + C_extra << endl;
+       << "   - C_safety_dist: " << C_safety_dist << endl
+       << "   - TOTAL: " << k_lat * C_lat + k_lon * C_lon << endl;
   #endif
 
   // Return the combined trajectory cost
-  return k_lat * C_lat + k_lon * C_lon + C_extra;
+  return k_lat * C_lat + k_lon * C_lon + C_safety_dist;
 }

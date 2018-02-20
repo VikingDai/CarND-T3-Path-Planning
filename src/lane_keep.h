@@ -31,9 +31,12 @@ class LaneKeep: public Behavior {
     // Cost calculation variables
     double dt;  // time step size for integral costs
     double k_j; // Coeff for jerk cost
+    double k_a; // Coeff for jerk cost
     double k_t; // Coeff for time cost
     double k_s; // Coeff for lat movement cost
     double k_d; // Coeff for lon movement cost
+
+    double k_safety; // Coeff for safety dist
 
     double k_lat; // weight of lat costs
     double k_lon; // weight of lon costs

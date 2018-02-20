@@ -16,12 +16,15 @@ LaneKeep::LaneKeep()
   dt = 0.1;  // time delta for summing integral costs
 
   k_j = 2.0; // Coeff for jerk cost
+  k_a = 2.0; // Coeff for acceleration cost
   k_t = 1.0; // Coeff for time cost
   k_s = 25.0; // Coeff for lat movement cost
   k_d = 1.0; // Coeff for lon movement cost
 
+  k_safety = 140.0; // Coeff for safety dist
+
   k_lon = 1.0; // weight of lon costs
-  k_lat = 0.1; // weight of lat costs
+  k_lat = 0.6; // weight of lat costs
 }
 
 LaneKeep::~LaneKeep(){/* Nothing to do here*/}
@@ -50,13 +53,21 @@ int LaneKeep::add_trajectories(TrajectorySet &t_set,
   // Our actual target lateral position since keeping is based on
   // our current lane and not the reference lane
   int current_lane = r.get_lane(di);
-  double cur_lane_d = r.get_lane_mid_frenet(reference_lane);
+  double cur_lane_d = r.get_lane_mid_frenet(current_lane);
 
   // Who are we following in this lane? How close are we to that guy
-  // will depend on the final s value
-  int leading_id = o.vehicle_to_follow(current_lane);
-  Obstacle leading_vehicle;
-  if(leading_id != -1) leading_vehicle = o.get_vehicle(leading_id);
+  // will depend on the final s value.
+  double follow_s = 0.0;
+  double follow_s_dot = 0.0;
+  double follow_a = 0.0;
+  int follow_id = o.vehicle_to_follow();
+  if(follow_id != -1)
+  {
+    Obstacle leading_vehicle = o.get_vehicle(follow_id);
+    follow_s = leading_vehicle.s;
+    follow_s_dot = (leading_vehicle.s_dot == 0 ? leading_vehicle.speed : leading_vehicle.s_dot);
+    follow_a = 0.0; // maybe someday I can get a better approximation of this
+  }
 
   // Define constraint ranges
   // NOTE: Its important to think about whats reasonable here. For example,
@@ -68,10 +79,14 @@ int LaneKeep::add_trajectories(TrajectorySet &t_set,
   // does too.
   // NOTE: As such, I'm using naive kinematics to try to pick a target time
   // all while being careful to not have a target time that too low. A short
-  // JMT could have weird things happen past the time line
+  // JMT could have weird things happen past the time line.
+  // NOTE: In cases where my speed is in fact close to the target and I choose
+  // to deceleration based on the costs here, excess acceleration could happen
+  // since the time range was based on distance from the target speed and not
+  // the eventual/actual speed
 
   // Time contraints
-  double target_T = max(abs(target_s_dot - si_dot) / 3.0, 1.5);
+  double target_T = max(abs(target_s_dot - si_dot) / 1.5, 2.0);
   double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
   double max_T = target_T + 6.0 * dT;
@@ -79,7 +94,7 @@ int LaneKeep::add_trajectories(TrajectorySet &t_set,
   // Velocity contraints
   double min_V = target_s_dot - 10.0; // m/s -- NOTE: 50MPH -> 22.352
   double max_V = target_s_dot;
-  double dV = (max_V - min_V) / 6.0;
+  double dV = (max_V - min_V) / 10.0;
 
   #ifdef DEBUG
   cout << " [*] Trying " << ((max_V - min_V) / dV) * ((max_T - min_T) / dT) << " combinations" << endl;
@@ -133,6 +148,10 @@ int LaneKeep::add_trajectories(TrajectorySet &t_set,
       // Given this trajectory, how close will we be to the vehicle
       // in front of us, if there is one
       double follow_sf = -1;
+      if(follow_id != -1)
+      {
+        follow_sf = follow_s + follow_s_dot * T + 0.5 * follow_a * T * T;
+      }
 
       // Get the cost of the trajectory, set it
       // cost based on how far off we are from speed limit
@@ -196,34 +215,37 @@ double LaneKeep::cost(const Trajectory &traj, const double &target_s_dot,
   J_t_lon /= (traj.T / dt);
   J_t_lat /= (traj.T / dt);
 
+  // Try using AVERAGE accel to get rid of the issues that come with using
+  // longer time frames
+  A_t_lon /= (traj.T / dt);
+  A_t_lat /= (traj.T / dt);
+
+  // Calculate a safety distance cost based on our final position and the
+  // vehicle we're following's final position
+  double sf = traj.s.get_position_at(traj.T);
+  double inv_follow_dist = 1.0 / (follow_sf - sf);
+  if(follow_sf == -1) inv_follow_dist = 0.0;
+  else if(sf >= follow_sf) inv_follow_dist = 0.2;
+  double C_safety_dist = exp(k_safety * abs(inv_follow_dist));
+
   // Get the total Lateral Trajectory cost
-  // s cost is penalizing the magnitude of the distance from target speed
   //             (  JERK COST  )   (  TIME COST )   (      LAT COST     )
-  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_s * s_dot_delta_2);
+  double C_lon = (k_j * J_t_lon) + (k_t * traj.T) + (k_s * s_dot_delta_2) + (k_a * A_t_lon);
 
   // Get the total Longitudinal Trajectory cost
-  // d cost is chosen as (df - target_d)^2 because we ideally converge on
-  // d = target_d and keep that d and we want to punish trajectories that
-  // dont converge. Its NOT integral because most trajectories should just
-  // be working on converging the whole time. We dont want to punish slow
-  // convergence because it actually might be ideal and most comfortable!
   //             (  JERK COST  )   (  TIME COST )   (    LON COST   )
-  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_d * d_delta_2);
+  double C_lat = (k_j * J_t_lat) + (k_t * traj.T) + (k_d * d_delta_2) + (k_a * A_t_lat);
 
   #ifdef DEBUG
   cout << " [*] Cost Breakdown:" << endl
-       << "   - sf_dot: " << sf_dot << endl
-       << "   - target_s_dot: " << target_s_dot << endl
-       << "   - target_d: " << target_d << endl
-       << "   - time: " << traj.T << endl
        << "   - C_lon: " << k_lon * C_lon << endl
        << "     - J_lon: " << (k_j * J_t_lon) << endl
        << "   - C_lat: " << k_lat * C_lat << endl
        << "     - J_lat: " << (k_j * J_t_lat) << endl
-       << "   - C_time: " << (k_t * traj.T) << endl
+       << "   - C_safety_dist: " << C_safety_dist << endl
        << "   - TOTAL: " << k_lat * C_lat + k_lon * C_lon << endl;
   #endif
 
   // Return the combined trajectory cost
-  return k_lat * C_lat + k_lon * C_lon;
+  return k_lat * C_lat + k_lon * C_lon + C_safety_dist;
 }

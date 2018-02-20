@@ -19,7 +19,7 @@
 
 // Our initial speed limit. In theory, localization would help update this
 // as we move around our world
-#define SPEED_LIMIT 43.0
+#define SPEED_LIMIT 48.0
 
 // Constants representing our vehicle. In the real world each car would
 // have its own config space that a class would probably look at to set

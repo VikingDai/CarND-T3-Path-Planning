@@ -6,8 +6,8 @@
 using namespace std;
 
 // TO-DO: Define some debug header maybe so it can be cross file?
-#define CLI_OUTPUT
 #define DEBUG
+// #define CLI_OUTPUT
 
 /******************************************************************************
 * Utility Functions and Helpers                                               *
