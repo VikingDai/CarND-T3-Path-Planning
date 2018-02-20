@@ -394,9 +394,6 @@ TrajectorySet VirtualDriver::generate_trajectories()
   double si, si_dot, si_dot_dot;
   double di, di_dot, di_dot_dot;
 
-  // Useful Vehicle State vars cached
-  int current_lane = mRoad.get_vehicle_lane(mVeh);
-
   // Calculate an index based on how many dots have been eaten
   // and how many we've decided to consistently plan out to.
   // We can pull our initial status off this
@@ -448,7 +445,6 @@ TrajectorySet VirtualDriver::generate_trajectories()
             << "   - di:    " << di << std::endl
             << "   - di_d:  " << di_dot << std::endl
             << "   - di_dd: " << di_dot_dot << std::endl
-            << "   - current_lane: " << current_lane << std::endl
             << "   - reference_lane: " << m_reference_lane << std::endl
             << "   - speed_limit: " << mRoad.speed_limit << " m/s" << std::endl;
   #endif
@@ -473,8 +469,8 @@ TrajectorySet VirtualDriver::generate_trajectories()
     count = m_vehicle_behaviors[j]->add_trajectories(n_possible_trajectories,
                                                    si, si_dot, si_dot_dot,
                                                    di, di_dot, di_dot_dot,
-                                                   current_lane, m_reference_lane,
-                                                   mRoad, m_tracker);
+                                                   m_reference_lane, mRoad,
+                                                   m_tracker);
 
     #ifdef DEBUG
     std::cout << " [+] Added " << count << " for '"

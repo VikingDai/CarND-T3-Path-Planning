@@ -18,16 +18,17 @@ class LaneFollow: public Behavior {
     int add_trajectories(TrajectorySet &t_set,
                           double si, double si_dot, double si_dot_dot,
                           double di, double di_dot, double di_dot_dot,
-                          const int &current_lane, const int &reference_lane,
-                          const Road &r, ObstacleTracker &o) const;
-
-    double cost(const Trajectory &traj, const double &target_s,
-                const double &target_d, const double &target_s_dot,
-                const double &follow_sf, const double &speed_limit) const;
+                          const int &reference_lane, const Road &r,
+                          ObstacleTracker &o) const;
 
     std::string name() const;
 
   private:
+
+    // Cost function for Lane Following
+    double cost(const Trajectory &traj, const double &target_s,
+                const double &target_d, const double &target_s_dot,
+                const double &follow_sf, const double &speed_limit) const;
 
     // Constants for time gap and distance buffer
     double distance_buffer; // D_0

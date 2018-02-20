@@ -123,7 +123,15 @@ int main()
   Vehicle v = Vehicle();
   v.length = VEH_LENGTH; // 4.47 meters
   v.width = VEH_WIDTH;   // 2.43 meters
-  v.d = 6.0; // We can make an educated guess at initial status
+
+  // We can make an educated guess at initial status since the sim
+  // starts the same every time.
+  v.d = 6.0;
+  v.s = 124.834;
+  v.d = 6.16483;
+  v.yaw = 0.0;
+  v.x = 909.48;
+  v.y = 1128.67;
 
   // Virtual Driver options and object
   double prediction_horizon = 1.50; // 75 steps

@@ -1,7 +1,7 @@
 #include "obstacle.h"
 
 // Default Constructor
-Obstacle::Obstacle(){}
+Obstacle::Obstacle(){id = -1; t = -1; s = -1.0; d = -1.0; speed = 0.0;}
 
 // Non-Default Constuctors
 Obstacle::Obstacle(const int &id, const long &ts, const double &s, const double &d, const double &speed)

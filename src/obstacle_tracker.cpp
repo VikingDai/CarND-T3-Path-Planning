@@ -3,7 +3,7 @@
 #include <iostream>
 using namespace std;
 
-// #define DEBUG
+#define DEBUG
 #define DEBUG_LITE
 
 // Receive Sensor Fusion Updates

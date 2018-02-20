@@ -17,14 +17,14 @@ LaneChange::LaneChange()
   distance_buffer = 3.0; // meters, fixed distance of safety past a time gap
   time_gap = 0.5;        // seconds,
 
-  dt = 0.1;  // time delta for summing integral costs
+  dt = 0.1;   // time delta for summing integral costs
 
-  k_j = 2.0; // Coeff for jerk cost
-  k_t = 1.0; // Coeff for time cost
+  k_j = 2.0;  // Coeff for jerk cost
+  k_t = 1.0;  // Coeff for time cost
   k_s = 25.0; // Coeff for lat movement cost
-  k_d = 1.0; // Coeff for lon movement cost
+  k_d = 1.0;  // Coeff for lon movement cost
 
-  k_lon = 1.0; // weight of lon costs
+  k_lon = 1.0; // weight of longitudinal costs
   k_lat = 0.1; // weight of lateral costs
 }
 
@@ -57,8 +57,8 @@ static int N = 0;
 int LaneChange::add_trajectories(TrajectorySet &t_set,
                                   double si, double si_dot, double si_dot_dot,
                                   double di, double di_dot, double di_dot_dot,
-                                  const int &current_lane, const int &reference_lane,
-                                  const Road &r, ObstacleTracker &o) const
+                                  const int &reference_lane, const Road &r,
+                                  ObstacleTracker &o) const
 {
   #ifdef DEBUG
   cout << " [-] Determing trajectories for '" << name() << "'" << endl;
@@ -68,33 +68,33 @@ int LaneChange::add_trajectories(TrajectorySet &t_set,
   // Record how many trajectories we've added
   int added = 0;
 
-  // Save the speed limit
-  double speed_limit = r.speed_limit;
-  double target_speed = r.speed_limit;
+  // In all cases, the target speed we really want to be going is the
+  // ultimate speed limit set for the road.
+  double target_s_dot = r.speed_limit;
 
-  // Target lateral final position - will change based on what
-  // lane we try
-  double target_d = 0.0;
+  // Target lateral final position is the reference lane's position
+  // but penalties for staying on that line can cause us to change
+  // lanes and move that reference line
+  int current_lane = r.get_lane(di);
+  double target_d = r.get_lane_mid_frenet(reference_lane);
 
-  // for a "close-ness" cost
-  int follow_id = o.vehicle_to_follow();
-  double follow_ds = 0.0;
-  if(follow_id != -1) follow_ds = o.get_vehicle(follow_id).s;
-
-  // Time contraints
-  double target_T = 4.0;
+  // Time contraints for our manuever. Take the max of 2 seconds
+  // and however long kinematics tells us a change in s_dot should
+  // take given a modest acceleration value
+  double target_T = max(abs(target_s_dot - si_dot) / 3.0, 4.0);
   double dT = 0.5;
   double min_T = target_T - 0.0 * dT;
   double max_T = target_T + 6.0 * dT;
 
-  // Velocity contraints
-  double min_V = target_speed - 10.0; // m/s -- NOTE: 50MPH -> 22.352
-  double max_V = target_speed;
+  // Velocity contraints for our manuever
+  // NOTE: 50MPH -> 22.352 m/s, so keep this in mind
+  double min_V = target_s_dot - 10.0; // m/s
+  double max_V = target_s_dot;
   double dV = (max_V - min_V) / 6.0;
 
   // Lateral Movement/Lane constraints
   int min_l = max(0, current_lane - 1);
-  int max_l = min(r.lane_count, current_lane + 1);
+  int max_l = min(r.lane_count - 1, current_lane + 1);
   int dl = 1;
 
   // If we're in the middle of a change (i.e we're the current behavior)
@@ -106,34 +106,47 @@ int LaneChange::add_trajectories(TrajectorySet &t_set,
     cout << " [*] Current Behavior! Need to decide what to do!" << endl;
     #endif
 
-    if(current_lane != reference_lane ||
-       abs(r.get_lane_mid_frenet(reference_lane) - di) > 0.1)
+    if(current_lane != reference_lane || abs(target_d - di) > 0.1)
     {
       #ifdef DEBUG
       cout << " [!] Lane change determined not to be complete!\n"
            << "   - Current d: " << di << "\n"
-           << "   - Target d: " << r.get_lane_mid_frenet(reference_lane) << "\n";
+           << "   - Target d: " << target_d << "\n";
       #endif
 
       min_l = max_l = reference_lane;
     }
   }
 
+  // Add trajectories for each lane we want to change into
   for(int l = min_l; l <= max_l; l += dl)
   {
+    // If we're not in a state where we're finishing an existing lane change
+    // then dont check our own lane. Thats the same as lane keeping!
     if(!current && l == current_lane) continue;
 
     // Set the target/final d value
-    target_d = r.get_lane_mid_frenet(l);
+    double df = r.get_lane_mid_frenet(l);
+
+    // Now that we know which lane we're thinking of going into, lets
+    // see what we're changing into. Who would we be following? How
+    // close are we to that guy will depend on the final s value
+    int leading_id = o.vehicle_to_follow(l);
+    Obstacle leading_vehicle;
+    if(leading_id != -1) leading_vehicle = o.get_vehicle(leading_id);
+
+    #ifdef DEBUG
+    cout << " [!] Trying Lane " << l << " -- d = " << target_d << endl;
+    #endif
 
     // Iterate on possible time frames
     for(double T = min_T; T <= max_T; T += dT)
     {
       // Given this time, calculate a given d_path
-      JMT d_path = JMT({di, di_dot, di_dot_dot}, {target_d, 0.0, 0.0}, T);
+      JMT d_path = JMT({di, di_dot, di_dot_dot}, {df, 0.0, 0.0}, T);
 
       // Vary longitudinal velocities here to get an s_path and final traj
-      for(double v = min_V; v <= max_V; v += dV)
+      for(double sf_dot = min_V; sf_dot <= max_V; sf_dot += dV)
       {
         #ifdef DEBUG
         cout << " [-] Trying Lane Changing Traj:" << endl
@@ -143,21 +156,25 @@ int LaneChange::add_trajectories(TrajectorySet &t_set,
              << "   - di: " << di << endl
              << "   - di_d: " << di_dot << endl
              << "   - di_d_d: " << di_dot_dot << endl
-             << "   - target_d: " << target_d << endl
-             << "   - target_V: " << v << endl
+             << "   - df: " << df << endl
+             << "   - sf_dot: " << sf_dot << endl
              << "   - T: " << T << endl;
         #endif
 
         // S trajectory will be created given our target start state,
         // target velocity, and a target time horizon
-        JMT s_path = JMT({si, si_dot, si_dot_dot}, v, T);
+        JMT s_path = JMT({si, si_dot, si_dot_dot}, sf_dot, T);
 
         // Turn our JMTs into a full blown trajectory
         Trajectory traj = Trajectory(id, s_path, d_path, T);
 
+        // Given our path and the lane we're going into, where is that
+        // leading car going to be reletive to use?
+        double follow_sf = -1;
+
         // Get the cost of the trajectory, set it
         // cost based on how far off we are from speed limit
-        double c = cost(traj, target_speed, speed_limit, target_d, follow_ds);
+        double c = cost(traj, target_s_dot, target_d, follow_sf);
         traj.cost = c;
 
         #ifdef DEBUG_COST
@@ -186,13 +203,12 @@ int LaneChange::add_trajectories(TrajectorySet &t_set,
 
 // Cost function for trajectories that were created by merging in between two
 // cars.
-double LaneChange::cost(const Trajectory &traj, const double &target_s,
-                        const double &target_d, const double &speed_limit,
-                        const double &follow_sf) const
+double LaneChange::cost(const Trajectory &traj, const double &target_s_dot,
+                        const double &target_d, const double &follow_sf) const
 {
   // Difference between target speed and final speed
   double sf_dot = traj.s.get_velocity_at(traj.T);
-  double s_delta_2 = (sf_dot - speed_limit) * (sf_dot - speed_limit);
+  double s_delta_2 = (sf_dot - target_s_dot) * (sf_dot - target_s_dot);
 
   // Difference between target lane position and final position
   double df = traj.d.get_position_at(traj.T);

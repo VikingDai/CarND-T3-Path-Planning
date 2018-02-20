@@ -32,10 +32,10 @@ LaneFollow::~LaneFollow(){/* Nothing to do here*/}
 std::string LaneFollow::name() const {return "Lane Following";}
 
 int LaneFollow::add_trajectories(TrajectorySet &t_set,
-                                  double si, double si_dot, double si_dot_dot,
-                                  double di, double di_dot, double di_dot_dot,
-                                  const int &current_lane, const int &reference_lane,
-                                  const Road &r, ObstacleTracker &o) const
+                                 double si, double si_dot, double si_dot_dot,
+                                 double di, double di_dot, double di_dot_dot,
+                                 const int &reference_lane, const Road &r,
+                                 ObstacleTracker &o) const
 {
 
   #ifdef DEBUG
@@ -67,6 +67,7 @@ int LaneFollow::add_trajectories(TrajectorySet &t_set,
 
   // Our target values
   double speed_limit = r.speed_limit;
+  int current_lane = r.get_lane(di);
   double target_d = r.get_lane_mid_frenet(current_lane);
 
   // Iterate on possible T values for this behavior

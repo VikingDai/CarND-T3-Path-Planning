@@ -57,8 +57,8 @@ class Behavior
     virtual int add_trajectories(TrajectorySet &t_set,
                                  double si, double si_dot, double si_dot_dot,
                                  double di, double di_dot, double di_dot_dot,
-                                 const int &current_lane, const int &reference_lane,
-                                 const Road &r, ObstacleTracker &o) const = 0;
+                                 const int &reference_lane, const Road &r,
+                                 ObstacleTracker &o) const = 0;
 
     // Cost Function for the Behavior Type:
     // ------------------------------------
